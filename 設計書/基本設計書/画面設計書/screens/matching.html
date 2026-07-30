@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SCR-010 マッチング（廃止） — 基本設計</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">MS</span><div><strong>MatchingService</strong><small>基本設計書</small></div></div>
+      <nav class="nav">
+        <a class="nav-item" href="../index.html">一覧</a>
+        <a class="nav-item is-active" href="matching.html">マッチング（廃止）</a>
+        <a class="nav-item" href="projects.html">案件一覧</a>
+      </nav>
+    </aside>
+    <main class="main main--bd">
+      <header class="topbar">
+        <div><h1>SCR-010 マッチング（廃止）</h1><p class="muted">旧 URL: /matching</p></div>
+        <div class="topbar-actions"><a class="btn btn-secondary" href="../../../システムイメージ/matching.html">旧画面イメージ（参考）</a></div>
+      </header>
+      <div class="bd-meta"><span>画面ID: SCR-010</span><span>状態: 廃止</span><span>旧 URL: /matching</span></div>
+
+      <section class="panel bd-section">
+        <h2>1. 廃止内容</h2>
+        <p>手動マッチング実行・直近結果確認用の専用画面を廃止した。Web アプリから <code>/matching</code> ルートは削除済み。</p>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>2. 機能の移管先</h2>
+        <table class="table">
+          <thead><tr><th>旧機能</th><th>移管先</th></tr></thead>
+          <tbody>
+            <tr><td>ルールスコア採点の手動実行</td><td><a href="projects.html">SCR-004 案件一覧</a>（「ルール採点を実行」）→ <code>POST /api/match-runs</code>（BAT-003）</td></tr>
+            <tr><td>直近マッチ結果の確認</td><td>人材詳細・案件詳細の採点結果一覧</td></tr>
+            <tr><td>AI 判定の手動実行</td><td>人材詳細・案件詳細の「選択をAI採点」→ <code>POST /api/match-runs/{id}/ai-judge</code>（BAT-004）</td></tr>
+            <tr><td>要員への案件提案</td><td><a href="talent-detail.html">SCR-003 人材詳細</a>（プレビュー・本文編集可）→ BAT-007</td></tr>
+            <tr><td>案件への要員提案</td><td><a href="project-detail.html">SCR-005 案件詳細</a> → BAT-009</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>3. 関連</h2>
+        <ul>
+          <li><a href="matching-detail.html">SCR-011 マッチング詳細（廃止）</a></li>
+          <li><a href="matching-send.html">SCR-012 案件への提案送信（廃止）</a></li>
+        </ul>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

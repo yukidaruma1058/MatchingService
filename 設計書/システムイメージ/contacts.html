@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>担当者一覧 — MatchingService</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">MS</span>
+        <div>
+          <strong>MatchingService</strong>
+          <small>システムイメージ</small>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="nav-item" href="index.html">ダッシュボード</a>
+        <a class="nav-item" href="talents.html">人材一覧</a>
+        <a class="nav-item" href="projects.html">案件一覧</a>
+        <a class="nav-item" href="companies.html">企業一覧</a>
+        <a class="nav-item is-active" href="contacts.html">担当者一覧</a>
+        <a class="nav-item" href="matching.html">マッチング</a>
+        <a class="nav-item" href="emails.html">メール取込</a>
+        <a class="nav-item" href="settings.html">設定</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1>担当者一覧</h1>
+          <p class="muted">企業ごとのメール送信先（主担当・副担当）</p>
+        </div>
+        <div class="topbar-actions">
+          <a class="btn btn-secondary" href="companies.html">企業一覧</a>
+          <a class="btn btn-primary" href="contact-new.html">担当者を追加</a>
+        </div>
+      </header>
+
+      <form class="filter-bar" action="contacts.html" method="get">
+        <div class="field grow">
+          <label for="q">キーワード</label>
+          <input id="q" name="q" type="search" placeholder="氏名 / メール / 会社名" />
+        </div>
+        <div class="field">
+          <label for="company">企業</label>
+          <select id="company" name="company">
+            <option>すべて</option>
+            <option selected>株式会社クラウドネクスト</option>
+            <option>株式会社フロントラボ</option>
+            <option>株式会社テックブリッジ</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="role">役割</label>
+          <select id="role" name="role">
+            <option>すべて</option>
+            <option selected>主担当</option>
+            <option>副担当</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" type="submit">検索</button>
+      </form>
+
+      <section class="panel">
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>氏名</th>
+                <th>企業</th>
+                <th>メール</th>
+                <th>役割</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>田村 翔</td>
+                <td><a href="company-detail.html">株式会社クラウドネクスト</a></td>
+                <td>project-desk@cloudnext.example</td>
+                <td><span class="badge badge-ok">主担当</span></td>
+                <td><a href="contact-edit.html">編集</a></td>
+              </tr>
+              <tr>
+                <td>石井 奈々</td>
+                <td><a href="company-detail.html">株式会社クラウドネクスト</a></td>
+                <td>n.ishii@cloudnext.example</td>
+                <td><span class="badge badge-muted">副担当</span></td>
+                <td><a href="contact-edit.html">編集</a></td>
+              </tr>
+              <tr>
+                <td>中村 葵</td>
+                <td><a href="company-detail.html">株式会社フロントラボ</a></td>
+                <td>ec-front@frontlab.example</td>
+                <td><span class="badge badge-ok">主担当</span></td>
+                <td><a href="contact-edit.html">編集</a></td>
+              </tr>
+              <tr>
+                <td>加藤 亮</td>
+                <td><a href="company-detail.html">株式会社データワークス</a></td>
+                <td>data-hr@dataworks.example</td>
+                <td><span class="badge badge-ok">主担当</span></td>
+                <td><a href="contact-edit.html">編集</a></td>
+              </tr>
+              <tr>
+                <td>佐々木 真</td>
+                <td><a href="company-detail.html">株式会社テックブリッジ</a></td>
+                <td>sales@techbridge.example</td>
+                <td><span class="badge badge-ok">主担当</span></td>
+                <td><a href="contact-edit.html">編集</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

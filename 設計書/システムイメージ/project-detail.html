@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>案件詳細 — MatchingService</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">MS</span>
+        <div>
+          <strong>MatchingService</strong>
+          <small>システムイメージ</small>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="nav-item" href="index.html">ダッシュボード</a>
+        <a class="nav-item" href="talents.html">人材一覧</a>
+        <a class="nav-item is-active" href="projects.html">案件一覧</a>
+        <a class="nav-item" href="companies.html">企業一覧</a>
+        <a class="nav-item" href="contacts.html">担当者一覧</a>
+        <a class="nav-item" href="matching.html">マッチング</a>
+        <a class="nav-item" href="emails.html">メール取込</a>
+        <a class="nav-item" href="settings.html">設定</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1>案件詳細 / P-2208</h1>
+          <p class="muted">配信元: 株式会社クラウドネクスト ／ 要約案件情報と応募人材</p>
+        </div>
+        <div class="topbar-actions">
+          <a class="btn btn-secondary" href="projects.html">一覧へ戻る</a>
+          <a class="btn btn-primary" href="matching.html">この案件でマッチ</a>
+        </div>
+      </header>
+
+      <section class="detail-layout">
+        <article class="detail-card">
+          <h2>要約案件情報</h2>
+          <dl class="kv">
+            <dt>案件名</dt><dd>基幹刷新</dd>
+            <dt>配信元会社</dt><dd><strong>株式会社クラウドネクスト</strong></dd>
+            <dt>エンド企業</dt><dd>大手製造系（非公開）</dd>
+            <dt>単価</dt><dd>75〜80万円 / 月</dd>
+            <dt>期間</dt><dd>6ヶ月〜</dd>
+            <dt>開始時期</dt><dd>即日〜来月</dd>
+            <dt>勤務形態</dt><dd>週2〜3出社 / リモート併用</dd>
+            <dt>商流</dt><dd>エンド直 / 一次請け</dd>
+            <dt>面談</dt><dd>1〜2回（オンライン可）</dd>
+          </dl>
+          <div class="chip-row">
+            <span class="chip">Java</span>
+            <span class="chip">Spring Boot</span>
+            <span class="chip">AWS</span>
+            <span class="chip">PostgreSQL</span>
+          </div>
+        </article>
+
+        <article class="detail-card">
+          <h2>取込元</h2>
+          <dl class="kv">
+            <dt>配信元会社</dt><dd><strong>株式会社クラウドネクスト</strong></dd>
+            <dt>送信元</dt><dd>project-desk@cloudnext.example</dd>
+            <dt>ラベル</dt><dd>SES案件配信</dd>
+            <dt>件名</dt><dd>【案件】基幹システム刷新 Java</dd>
+            <dt>受信日時</dt><dd>2026-07-09 10:02</dd>
+            <dt>状態</dt><dd><span class="badge badge-ok">要約済</span></dd>
+            <dt>応募先</dt><dd>project-desk@cloudnext.example</dd>
+          </dl>
+        </article>
+      </section>
+
+      <section class="panel" style="margin-top:16px;">
+        <div class="panel-head">
+          <h2>応募人材</h2>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>人材</th>
+                <th>紹介元会社</th>
+                <th>スキル</th>
+                <th>希望単価</th>
+                <th>マッチスコア</th>
+                <th>応募日</th>
+                <th>状態</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><a href="talent-detail.html">T-1042 / 山田 太郎</a></td>
+                <td>株式会社テックブリッジ</td>
+                <td>Java / Spring / AWS</td>
+                <td>75万</td>
+                <td><strong>94</strong></td>
+                <td>2026-07-08</td>
+                <td><span class="badge badge-warn">選考中</span></td>
+                <td><a href="talent-detail.html">人材詳細</a></td>
+              </tr>
+              <tr>
+                <td><a href="talent-detail.html">T-1038 / 高橋 健</a></td>
+                <td>株式会社スキルリンク</td>
+                <td>Java / Kotlin</td>
+                <td>72万</td>
+                <td><strong>86</strong></td>
+                <td>2026-07-09</td>
+                <td><span class="badge badge-brand">応募済</span></td>
+                <td><a href="talent-detail.html">人材詳細</a></td>
+              </tr>
+              <tr>
+                <td><a href="talent-detail.html">T-1040 / 鈴木 一郎</a></td>
+                <td>株式会社データワークス</td>
+                <td>Python / AWS</td>
+                <td>68万</td>
+                <td><strong>71</strong></td>
+                <td>2026-07-09</td>
+                <td><span class="badge badge-brand">応募済</span></td>
+                <td><a href="talent-detail.html">人材詳細</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

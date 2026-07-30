@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SCR-008 企業詳細 — 基本設計</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">MS</span><div><strong>MatchingService</strong><small>基本設計書</small></div></div>
+      <nav class="nav">
+        <a class="nav-item" href="../index.html">一覧</a>
+        <a class="nav-item" href="companies.html">企業一覧</a>
+        <a class="nav-item is-active" href="company-detail.html">企業詳細</a>
+      </nav>
+    </aside>
+    <main class="main main--bd">
+      <header class="topbar">
+        <div><h1>SCR-008 企業詳細</h1><p class="muted">企業情報・担当者の参照（企業マスタは現状 UI 未実装）</p></div>
+        <div class="topbar-actions"><a class="btn btn-secondary" href="../../../システムイメージ/company-detail.html">画面イメージ</a></div>
+      </header>
+      <div class="bd-meta"><span>画面ID: SCR-008</span><span>URL: /companies/:id</span></div>
+
+      <section class="panel bd-section">
+        <h2>1. 画面概要</h2>
+        <p>既存企業の基本情報・担当者一覧を表示する。提案メールの件名・本文は企業ごとテンプレではなく、BAT-007 / BAT-009 のコード内固定フォーマットで生成する（DB の <code>email_templates</code> は持たない）。</p>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>2. 画面遷移</h2>
+        <table class="table flow-table">
+          <tbody>
+            <tr><td>遷移元</td><td>企業一覧、企業追加（登録後）、案件一覧（配信元リンク）、マッチング詳細</td></tr>
+            <tr><td>遷移先</td><td>企業一覧、<a href="company-edit.html">企業情報編集（SCR-018）</a>、担当者一覧、関連案件一覧</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>3. 表示・編集項目</h2>
+        <h3>企業情報（参照）</h3>
+        <p>企業名、区分、ドメイン、既定宛先、関連案件/人材件数</p>
+        <h3>担当者テーブル</h3>
+        <p>氏名、メール、役割（主担当/副担当）— contacts</p>
+        <h3>提案メール本文（参考）</h3>
+        <p class="muted">画面上でのテンプレ編集は行わない。実装は次のとおり。</p>
+        <ul>
+          <li>要員への案件提案: <code>api/app/talent_proposal_body.py</code> / <code>batch/BAT-007/talent_propose.py</code></li>
+          <li>案件への要員提案: <code>batch/BAT-009/project_propose.py</code> の <code>_build_body</code></li>
+          <li>件名: 元メール subject（なければ案件名）。必要に応じて <code>Re:</code> 付与</li>
+        </ul>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>4. 操作</h2>
+        <ul>
+          <li><strong>企業情報を編集</strong> → <a href="company-edit.html">SCR-018 企業情報編集</a></li>
+          <li>担当者を追加 → <a href="contact-new.html">SCR-017</a>、各行の編集 → <a href="contact-edit.html">SCR-019 担当者情報編集</a></li>
+        </ul>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>5. 参照 DB</h2>
+        <p>companies, contacts, projects, talents</p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

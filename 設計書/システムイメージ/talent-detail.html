@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>人材詳細 — MatchingService</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">MS</span>
+        <div>
+          <strong>MatchingService</strong>
+          <small>システムイメージ</small>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="nav-item" href="index.html">ダッシュボード</a>
+        <a class="nav-item is-active" href="talents.html">人材一覧</a>
+        <a class="nav-item" href="projects.html">案件一覧</a>
+        <a class="nav-item" href="companies.html">企業一覧</a>
+        <a class="nav-item" href="contacts.html">担当者一覧</a>
+        <a class="nav-item" href="matching.html">マッチング</a>
+        <a class="nav-item" href="emails.html">メール取込</a>
+        <a class="nav-item" href="settings.html">設定</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1>人材詳細 / T-1042</h1>
+          <p class="muted">紹介元: 株式会社テックブリッジ ／ AI 要約結果と応募中案件</p>
+        </div>
+        <div class="topbar-actions">
+          <a class="btn btn-secondary" href="talents.html">一覧へ戻る</a>
+          <a class="btn btn-primary" href="matching.html">この人材でマッチ</a>
+        </div>
+      </header>
+
+      <section class="detail-layout">
+        <article class="detail-card">
+          <h2>要約プロフィール</h2>
+          <dl class="kv">
+            <dt>氏名</dt><dd>山田 太郎</dd>
+            <dt>紹介元会社</dt><dd><strong>株式会社テックブリッジ</strong></dd>
+            <dt>所属会社</dt><dd>フリーランス（個人事業）</dd>
+            <dt>年齢</dt><dd>34歳</dd>
+            <dt>経験年数</dt><dd>8年</dd>
+            <dt>希望単価</dt><dd>75万円 / 月</dd>
+            <dt>稼働開始</dt><dd>即日</dd>
+            <dt>勤務形態</dt><dd>リモート併用可 / 週3出社可</dd>
+            <dt>最寄駅</dt><dd>東京</dd>
+          </dl>
+          <div class="chip-row">
+            <span class="chip">Java</span>
+            <span class="chip">Spring Boot</span>
+            <span class="chip">AWS</span>
+            <span class="chip">PostgreSQL</span>
+            <span class="chip">Docker</span>
+          </div>
+        </article>
+
+        <article class="detail-card">
+          <h2>取込元</h2>
+          <dl class="kv">
+            <dt>紹介元会社</dt><dd><strong>株式会社テックブリッジ</strong></dd>
+            <dt>送信元</dt><dd>sales@techbridge.example</dd>
+            <dt>ラベル</dt><dd>SES人材紹介</dd>
+            <dt>件名</dt><dd>【ご提案】Javaエンジニア 即日稼働</dd>
+            <dt>受信日時</dt><dd>2026-07-09 09:14</dd>
+            <dt>状態</dt><dd><span class="badge badge-ok">要約済</span></dd>
+          </dl>
+          <div class="flow-links">
+            <a class="btn btn-ghost" href="emails.html">元メール一覧</a>
+          </div>
+        </article>
+      </section>
+
+      <section class="panel" style="margin-top:16px;">
+        <div class="panel-head">
+          <h2>応募中の案件</h2>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>案件</th>
+                <th>配信元会社</th>
+                <th>必須スキル</th>
+                <th>単価</th>
+                <th>マッチスコア</th>
+                <th>応募日</th>
+                <th>状態</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><a href="project-detail.html">P-2208 / 基幹刷新</a></td>
+                <td>株式会社クラウドネクスト</td>
+                <td>Java / Spring / AWS</td>
+                <td>80万</td>
+                <td><strong>94</strong></td>
+                <td>2026-07-08</td>
+                <td><span class="badge badge-warn">選考中</span></td>
+                <td><a href="project-detail.html">案件詳細</a></td>
+              </tr>
+              <tr>
+                <td><a href="project-detail.html">P-2207 / ECフロント刷新</a></td>
+                <td>株式会社フロントラボ</td>
+                <td>React / Next.js</td>
+                <td>72万</td>
+                <td><strong>76</strong></td>
+                <td>2026-07-09</td>
+                <td><span class="badge badge-brand">応募済</span></td>
+                <td><a href="project-detail.html">案件詳細</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="muted" style="padding:8px 0 12px;">応募履歴がない場合は「応募中の案件はありません」と表示します。</p>
+      </section>
+
+      <section class="panel" style="margin-top:16px;">
+        <div class="panel-head"><h2>要約コメント</h2></div>
+        <p class="muted">
+          金融系・EC系でのバックエンド開発経験が中心。Spring Boot による API 設計、AWS 上の運用経験あり。
+          希望単価は市場相場内で、即日稼働可能な点が強み。
+        </p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

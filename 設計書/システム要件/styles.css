@@ -1,0 +1,134 @@
+@import url("../システムイメージ/styles.css");
+
+.main--req {
+  max-width: 1100px;
+}
+
+.req-intro {
+  margin: 0 0 20px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.req-section {
+  margin-bottom: 24px;
+}
+
+.req-section h2 {
+  margin: 0 0 10px;
+  font-size: 1.15rem;
+}
+
+.req-section h3 {
+  margin: 16px 0 8px;
+  font-size: 1rem;
+}
+
+.req-section p,
+.req-section li {
+  color: var(--ink);
+  line-height: 1.65;
+}
+
+.req-section ul {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.arch-diagram {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin: 12px 0 4px;
+}
+
+.arch-box {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.arch-box strong {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--brand);
+}
+
+.arch-box span {
+  display: block;
+  font-size: 0.88rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.arch-box.wide {
+  grid-column: 1 / -1;
+}
+
+.tech-table td:first-child {
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.tech-table .ver {
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+}
+
+.reason-card {
+  padding: 14px 16px;
+  border-left: 4px solid var(--brand);
+  background: rgba(255, 255, 255, 0.75);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  margin-bottom: 12px;
+}
+
+.reason-card h3 {
+  margin: 0 0 6px;
+}
+
+.reason-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.rejected-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rejected-list li {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.rejected-list li:last-child {
+  border-bottom: 0;
+}
+
+.rejected-list strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.rejected-list span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+@media (max-width: 980px) {
+  .arch-diagram {
+    grid-template-columns: 1fr;
+  }
+}

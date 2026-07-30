@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>共通機能設計書 — MatchingService</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">MS</span>
+        <div>
+          <strong>MatchingService</strong>
+          <small>基本設計書</small>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="nav-item" href="../画面設計書/index.html">画面設計書</a>
+        <a class="nav-item" href="../バッチ設計書/index.html">バッチ設計書</a>
+        <a class="nav-item is-active" href="index.html">共通機能</a>
+        <p class="nav-group-label">設計書</p>
+        <a class="nav-item" href="../../エラーコード一覧/index.html">エラーコード一覧</a>
+        <a class="nav-item" href="../../システム要件/index.html">技術選定</a>
+        <a class="nav-item" href="../../ER図/index.html">DB ER図</a>
+        <a class="nav-item" href="../../システムイメージ/index.html">画面イメージ</a>
+      </nav>
+    </aside>
+
+    <main class="main main--common">
+      <header class="topbar">
+        <div>
+          <h1>共通機能設計書</h1>
+          <p class="muted">API・バッチで共通利用するログ出力機能の基本設計</p>
+        </div>
+        <div class="topbar-actions">
+          <a class="btn btn-secondary" href="../バッチ設計書/index.html">バッチ設計書</a>
+          <a class="btn btn-secondary" href="../../エラーコード一覧/index.html">エラーコード一覧</a>
+        </div>
+      </header>
+
+      <div class="common-meta">
+        <span>機能ID: COM-001</span>
+        <span>対象: api/ batch/</span>
+        <span>出力: api=stdout / batch=<code>log/batch.log</code></span>
+        <span>形式: JSON Lines</span>
+        <span>個人情報マスキング</span>
+      </div>
+
+      <section class="panel common-section">
+        <div class="panel-head"><h2>1. 機能概要</h2></div>
+        <p>
+          ログ出力共通機能は、API・バッチ・外部連携処理から同一形式でログを出力するための共通部品である。
+          障害調査、バッチ再実行判断、外部API失敗の切り分け、ユーザー問い合わせ対応に必要な情報を残す。
+        </p>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>項目</th><th>内容</th></tr></thead>
+            <tbody>
+              <tr><td>対象処理</td><td>FastAPI のリクエスト処理、Gmail 振り分け/取込バッチ、AI 要約、ルールスコア採点、LLM 補助判定、Gmail 送信、DB 更新処理</td></tr>
+              <tr><td>出力先</td><td>API は標準出力。バッチは <code>log/batch.log</code>（<code>BATCH_LOG_PATH</code> で変更可）。Docker / Ofelia / 将来のログ基盤が収集する前提。</td></tr>
+              <tr><td>形式</td><td>1行1イベントの JSON Lines。改行を含む本文は出力しない。</td></tr>
+              <tr><td>共通キー</td><td><code>timestamp</code>, <code>level</code>, <code>service</code>, <code>function_id</code>, <code>module</code>, <code>method</code>, <code>operation</code>, <code>event</code>, <code>message</code>, <code>request_id</code>, <code>error_code</code>, <code>error_message</code>（エラー時）</td></tr>
+              <tr><td>禁止事項</td><td>メール本文、OAuth token、Cursor/OpenAI API key、DB パスワード、個人情報の詳細をそのまま出力しない。</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel common-section">
+        <div class="panel-head"><h2>2. ログレベル</h2></div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>レベル</th><th>用途</th><th>出力例</th></tr></thead>
+            <tbody>
+              <tr><td><code>DEBUG</code></td><td>開発時のみの詳細情報。本番では原則無効。</td><td>SQL生成前の条件、外部APIリクエストのメタ情報</td></tr>
+              <tr><td><code>INFO</code></td><td>正常な処理開始・終了・主要な状態遷移。</td><td>API受信、バッチ開始/終了、メール取込件数</td></tr>
+              <tr><td><code>WARN</code></td><td>処理継続は可能だが確認が必要な事象。</td><td>一部メールの要約失敗、対象データなし、リトライ発生</td></tr>
+              <tr><td><code>ERROR</code></td><td>処理失敗、外部連携失敗、DB更新失敗。</td><td><code>ERR-xxxx</code> とともに出力</td></tr>
+              <tr><td><code>CRITICAL</code></td><td>サービス継続不能な異常。</td><td>DB接続不可、必須設定不足、Gmail認証全件不可</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel common-section">
+        <div class="panel-head"><h2>3. 共通ログ項目</h2></div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>キー</th><th>必須</th><th>説明</th><th>例</th></tr></thead>
+            <tbody>
+              <tr><td class="log-key"><code>timestamp</code></td><td>必須</td><td>ログ出力日時。ISO 8601 UTC。</td><td><code>2026-07-09T15:00:00Z</code></td></tr>
+              <tr><td class="log-key"><code>level</code></td><td>必須</td><td>ログレベル。</td><td><code>INFO</code></td></tr>
+              <tr><td class="log-key"><code>service</code></td><td>必須</td><td>出力元サービス。</td><td><code>api</code>, <code>batch</code></td></tr>
+              <tr><td class="log-key"><code>function_id</code></td><td>必須</td><td>業務機能ID。画面ID、API機能ID、バッチID、共通機能IDのいずれか。</td><td><code>BAT-001</code>, <code>SCR-015</code>, <code>COM-001</code></td></tr>
+              <tr><td class="log-key"><code>module</code></td><td>必須</td><td>Python モジュールまたは処理コンポーネント。</td><td><code>batch.gmail_ingest</code></td></tr>
+              <tr><td class="log-key"><code>method</code></td><td>必須</td><td>関数名・メソッド名・APIハンドラ名。</td><td><code>fetch_message_body</code></td></tr>
+              <tr><td class="log-key"><code>operation</code></td><td>必須</td><td>業務操作名。メソッド名より利用者・運用者が理解しやすい粒度。</td><td><code>Gmail本文取得</code></td></tr>
+              <tr><td class="log-key"><code>event</code></td><td>必須</td><td>イベント名。ドット区切り。</td><td><code>gmail_ingest.started</code></td></tr>
+              <tr><td class="log-key"><code>message</code></td><td>必須</td><td>人が読める概要。</td><td><code>Gmail ingest started</code></td></tr>
+              <tr><td class="log-key"><code>request_id</code></td><td>API必須</td><td>APIリクエスト単位の相関ID。</td><td><code>req_...</code></td></tr>
+              <tr><td class="log-key"><code>job_id</code></td><td>バッチ必須</td><td>バッチ実行単位の相関ID。</td><td><code>job_20260709_150000</code></td></tr>
+              <tr><td class="log-key"><code>error_code</code></td><td>エラー時必須</td><td><a href="../../エラーコード一覧/index.html">エラーコード一覧</a> のコード。</td><td><code>ERR-0021</code></td></tr>
+              <tr><td class="log-key"><code>error_message</code></td><td>エラー時必須</td><td>利用者向け日本語メッセージ。<code>error_messages.py</code> の文言を基本とする。</td><td><code>Gmail メールの取得に失敗しました。</code></td></tr>
+              <tr><td class="log-key"><code>entity</code></td><td>任意</td><td>対象テーブルまたは業務エンティティ。</td><td><code>emails</code>, <code>talents</code></td></tr>
+              <tr><td class="log-key"><code>entity_id</code></td><td>任意</td><td>対象レコードID。存在する場合のみ。</td><td><code>12345</code></td></tr>
+              <tr><td class="log-key"><code>gmail_message_id</code></td><td>任意</td><td>GmailメッセージID。本文は出さない。</td><td><code>18f...</code></td></tr>
+              <tr><td class="log-key"><code>duration_ms</code></td><td>任意</td><td>処理時間ミリ秒。</td><td><code>1280</code></td></tr>
+              <tr><td class="log-key"><code>extra</code></td><td>任意</td><td>追加情報。個人情報・秘密情報を含めない。</td><td><code>{"count": 10}</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel common-section">
+        <div class="panel-head"><h2>4. イベント名</h2></div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>イベント</th><th>出力タイミング</th><th>主な追加項目</th></tr></thead>
+            <tbody>
+              <tr><td><code>api.request.started</code></td><td>APIリクエスト受信時</td><td><code>function_id</code>, <code>module</code>, <code>method</code>, <code>path</code>, <code>request_id</code></td></tr>
+              <tr><td><code>api.request.finished</code></td><td>APIレスポンス返却時</td><td><code>function_id</code>, <code>method</code>, <code>status_code</code>, <code>duration_ms</code></td></tr>
+              <tr><td><code>api.request.failed</code></td><td>API例外発生時</td><td><code>function_id</code>, <code>method</code>, <code>status_code</code>, <code>error_code</code></td></tr>
+              <tr><td><code>gmail_sort.started</code></td><td>Gmail振り分けバッチ（BAT-001）開始時</td><td><code>function_id</code>, <code>module</code>, <code>method</code>, <code>job_id</code></td></tr>
+              <tr><td><code>gmail_sort.settings_loaded</code></td><td>振り分け設定読込完了時</td><td><code>job_id</code>, <code>extra</code>（ラベル名）</td></tr>
+              <tr><td><code>gmail_sort.message_sorted</code></td><td>1通の振り分け成功時</td><td><code>gmail_message_id</code>, <code>extra</code>（<code>email_type</code>, <code>talent_hits</code>, <code>project_hits</code>）</td></tr>
+              <tr><td><code>gmail_sort.message_failed</code></td><td>1通の取得・ラベル更新失敗時</td><td><code>gmail_message_id</code>, <code>error_code</code>, <code>error_message</code></td></tr>
+              <tr><td><code>gmail_sort.finished</code></td><td>Gmail振り分けバッチ（BAT-001）終了時</td><td><code>job_id</code>, <code>duration_ms</code>, <code>extra</code>（走査/振り分け/スキップ/失敗件数）</td></tr>
+              <tr><td><code>gmail_ingest.started</code></td><td>Gmail取込バッチ（BAT-002）開始時</td><td><code>function_id</code>, <code>module</code>, <code>method</code>, <code>job_id</code>, <code>labels</code></td></tr>
+              <tr><td><code>ingest_cleanup.started</code></td><td>過去データ削除バッチ（BAT-006）開始時</td><td><code>function_id</code>, <code>module</code>, <code>method</code>, <code>job_id</code></td></tr>
+              <tr><td><code>ingest_cleanup.skipped</code></td><td>保持日数 0 で BAT-006 をスキップした時</td><td><code>retention_days</code></td></tr>
+              <tr><td><code>ingest_cleanup.finished</code></td><td>過去データ削除バッチ（BAT-006）終了時</td><td><code>retention_days</code>, <code>deleted</code>, <code>duration_ms</code></td></tr>
+              <tr><td><code>gmail_ingest.message_fetched</code></td><td>メール本文取得成功時</td><td><code>method</code>, <code>gmail_message_id</code>, <code>label_type</code></td></tr>
+              <tr><td><code>ai.summary.finished</code></td><td>AI 要約成功時</td><td><code>method</code>, <code>gmail_message_id</code>, <code>provider</code>, <code>model</code>, <code>duration_ms</code></td></tr>
+              <tr><td><code>matching.rule_score.finished</code></td><td>ルールスコア採点終了時</td><td><code>method</code>, <code>match_run_id</code>, <code>created_count</code></td></tr>
+              <tr><td><code>matching.ai_judgement.finished</code></td><td>LLM 補助判定終了時</td><td><code>method</code>, <code>match_run_id</code>, <code>judged_count</code>, <code>cached_count</code></td></tr>
+              <tr><td><code>gmail_send.finished</code></td><td>Gmail送信成功時</td><td><code>method</code>, <code>sent_email_id</code>, <code>gmail_message_id</code></td></tr>
+              <tr><td><code>batch.job.failed</code></td><td>バッチ継続不能エラー時</td><td><code>function_id</code>, <code>module</code>, <code>method</code>, <code>job_id</code>, <code>error_code</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel common-section">
+        <div class="panel-head"><h2>5. 出力サンプル</h2></div>
+        <pre class="log-sample">{
+  "timestamp": "2026-07-09T15:00:00Z",
+  "level": "ERROR",
+  "service": "batch",
+  "function_id": "BAT-001",
+  "module": "batch.gmail_ingest",
+  "method": "fetch_message_body",
+  "operation": "Gmail本文取得",
+  "event": "gmail_ingest.message_failed",
+  "message": "Gmail message fetch failed",
+  "job_id": "job_20260709_150000",
+  "error_code": "ERR-0021",
+  "error_message": "Gmail メールの取得に失敗しました。",
+  "gmail_message_id": "18f********",
+  "duration_ms": 2450,
+  "extra": {
+    "label_type": "talent",
+    "retry_count": 1
+  }
+}</pre>
+      </section>
+
+      <section class="panel common-section">
+        <div class="panel-head"><h2>6. マスキング方針</h2></div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>対象</th><th>出力方針</th><th>例</th></tr></thead>
+            <tbody>
+              <tr><td>メール本文</td><td>出力禁止。必要な場合は本文長やハッシュのみ。</td><td><code>body_length=1200</code></td></tr>
+              <tr><td>メールアドレス</td><td>原則マスク。ドメイン確認が必要な場合のみドメインを残す。</td><td><code>t***@example.com</code></td></tr>
+              <tr><td>OAuth token / API key</td><td>出力禁止。</td><td><code>[masked]</code></td></tr>
+              <tr><td>DB接続文字列</td><td>ユーザー名・パスワードを除外。</td><td><code>postgresql://***@db:5432/matching</code></td></tr>
+              <tr><td>氏名・会社担当者名</td><td>通常ログには出力しない。業務上必要な場合は DB ID を利用。</td><td><code>contact_id=123</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel common-section">
+        <div class="panel-head"><h2>7. API / バッチでの利用方法</h2></div>
+        <h3>API</h3>
+        <ul>
+          <li>リクエスト受信時に <code>request_id</code> を生成し、レスポンスヘッダーと全ログに付与する。</li>
+          <li>API ハンドラごとに <code>function_id</code>、<code>module</code>、<code>method</code>、<code>operation</code> を設定する。</li>
+          <li>例外ハンドラで <code>error_code</code> と HTTP ステータスを決定し、同じ情報をログとレスポンスに出力する。</li>
+          <li>正常終了時は <code>api.request.finished</code> に <code>status_code</code> と <code>duration_ms</code> を出力する。</li>
+        </ul>
+        <h3>バッチ</h3>
+        <ul>
+          <li>起動時に <code>job_id</code> を生成し、バッチ内の全ログに付与する。</li>
+          <li>バッチ全体は <code>function_id</code> に <code>BAT-001</code> などのバッチIDを設定し、各処理関数で <code>module</code> と <code>method</code> を更新する。</li>
+          <li>メール単位の処理では <code>gmail_message_id</code> を付与し、再実行時の追跡を容易にする。</li>
+          <li>一部失敗は <code>WARN</code> または <code>ERROR</code> として記録し、全体継続可否を <a href="../バッチ設計書/index.html">バッチ設計書</a> の方針に従って判定する。</li>
+        </ul>
+      </section>
+
+      <section class="panel common-section">
+        <div class="panel-head"><h2>8. 実装方針</h2></div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>項目</th><th>方針</th></tr></thead>
+            <tbody>
+              <tr><td>配置</td><td>API: <code>api/app/</code>（将来 <code>common/logging.py</code>）。バッチ: <code>batch/app/logging_util.py</code>, <code>batch/app/error_messages.py</code>。将来 <code>shared/</code> 化を検討する。</td></tr>
+              <tr><td>初期化</td><td>アプリ起動時・バッチ起動時にログレベル、JSON formatter、マスキング filter を設定する。</td></tr>
+              <tr><td>呼び出し</td><td><code>logger.info(function_id=..., module=..., method=..., operation=..., event=..., message=..., extra=...)</code> 相当のラッパーを利用し、直接 <code>print</code> は使わない。</td></tr>
+              <tr><td>エラー連携</td><td><a href="../../エラーコード一覧/index.html">エラーコード一覧</a> の <code>ERR-xxxx</code> を必ず含める。</td></tr>
+              <tr><td>テスト</td><td>マスキング対象がログに含まれないこと、必須キーが出力されることを単体テストで確認する。</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

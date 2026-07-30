@@ -1,0 +1,38 @@
+@import url("../システムイメージ/styles.css");
+
+.main--errors {
+  max-width: 1120px;
+}
+
+.error-section {
+  margin-bottom: 24px;
+}
+
+.error-section h2 {
+  margin: 0 0 10px;
+  font-size: 1.1rem;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.error-section p,
+.error-section li {
+  line-height: 1.65;
+}
+
+.error-code {
+  white-space: nowrap;
+  font-weight: 700;
+  color: var(--danger);
+}
+
+.error-category {
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.error-note {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}

@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>企業一覧 — MatchingService</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">MS</span>
+        <div>
+          <strong>MatchingService</strong>
+          <small>システムイメージ</small>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="nav-item" href="index.html">ダッシュボード</a>
+        <a class="nav-item" href="talents.html">人材一覧</a>
+        <a class="nav-item" href="projects.html">案件一覧</a>
+        <a class="nav-item is-active" href="companies.html">企業一覧</a>
+        <a class="nav-item" href="contacts.html">担当者一覧</a>
+        <a class="nav-item" href="matching.html">マッチング</a>
+        <a class="nav-item" href="emails.html">メール取込</a>
+        <a class="nav-item" href="settings.html">設定</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1>企業一覧</h1>
+          <p class="muted">人材紹介元・案件配信元の企業マスタ</p>
+        </div>
+        <div class="topbar-actions">
+          <a class="btn btn-secondary" href="contacts.html">担当者一覧</a>
+          <a class="btn btn-primary" href="company-new.html">企業を追加</a>
+        </div>
+      </header>
+
+      <form class="filter-bar" action="companies.html" method="get">
+        <div class="field grow">
+          <label for="q">キーワード</label>
+          <input id="q" name="q" type="search" placeholder="会社名 / ドメイン" />
+        </div>
+        <div class="field">
+          <label for="type">区分</label>
+          <select id="type" name="type">
+            <option>すべて</option>
+            <option selected>人材紹介</option>
+            <option>案件配信</option>
+            <option>両方</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" type="submit">検索</button>
+      </form>
+
+      <section class="panel">
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>企業名</th>
+                <th>区分</th>
+                <th>主担当</th>
+                <th>関連件数</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>株式会社クラウドネクスト</strong><br /><span class="muted">cloudnext.example</span></td>
+                <td><span class="badge badge-brand">案件配信</span></td>
+                <td>田村 翔 / project-desk@cloudnext.example</td>
+                <td>案件 12</td>
+                <td><a href="company-detail.html">詳細</a></td>
+              </tr>
+              <tr>
+                <td><strong>株式会社フロントラボ</strong><br /><span class="muted">frontlab.example</span></td>
+                <td><span class="badge badge-brand">案件配信</span></td>
+                <td>中村 葵 / ec-front@frontlab.example</td>
+                <td>案件 8</td>
+                <td><a href="company-detail.html">詳細</a></td>
+              </tr>
+              <tr>
+                <td><strong>株式会社データワークス</strong><br /><span class="muted">dataworks.example</span></td>
+                <td><span class="badge badge-brand">案件配信</span></td>
+                <td>加藤 亮 / data-hr@dataworks.example</td>
+                <td>案件 5</td>
+                <td><a href="company-detail.html">詳細</a></td>
+              </tr>
+              <tr>
+                <td><strong>株式会社テックブリッジ</strong><br /><span class="muted">techbridge.example</span></td>
+                <td><span class="badge badge-muted">人材紹介</span></td>
+                <td>佐々木 真 / sales@techbridge.example</td>
+                <td>人材 24</td>
+                <td><a href="company-detail.html">詳細</a></td>
+              </tr>
+              <tr>
+                <td><strong>株式会社スキルリンク</strong><br /><span class="muted">skilllink.example</span></td>
+                <td><span class="badge badge-muted">人材紹介</span></td>
+                <td>森 優 / desk@skilllink.example</td>
+                <td>人材 11</td>
+                <td><a href="company-detail.html">詳細</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

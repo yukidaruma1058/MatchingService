@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MatchingService — システムイメージ</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">MS</span>
+        <div>
+          <strong>MatchingService</strong>
+          <small>システムイメージ</small>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="nav-item is-active" href="index.html">ダッシュボード</a>
+        <a class="nav-item" href="talents.html">人材一覧</a>
+        <a class="nav-item" href="projects.html">案件一覧</a>
+        <a class="nav-item" href="companies.html">企業一覧</a>
+        <a class="nav-item" href="contacts.html">担当者一覧</a>
+        <a class="nav-item" href="matching.html">マッチング</a>
+        <a class="nav-item" href="emails.html">メール取込</a>
+        <a class="nav-item" href="settings.html">設定</a>
+      </nav>
+      <p class="sidebar-note">HTML プロトタイプ<br />画面遷移を確認できます</p>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1>ダッシュボード</h1>
+          <p class="muted">人材・案件・応募・取込の概況</p>
+        </div>
+        <div class="topbar-actions">
+          <a class="btn btn-secondary" href="companies.html">企業一覧</a>
+          <button class="btn btn-secondary" type="button">メール取り込み</button>
+          <a class="btn btn-primary" href="matching.html">マッチングを実行</a>
+        </div>
+      </header>
+
+      <section class="stats">
+        <article class="stat-card">
+          <span class="stat-label">登録人材</span>
+          <strong class="stat-value">128</strong>
+          <span class="stat-meta">今週 +12</span>
+        </article>
+        <article class="stat-card">
+          <span class="stat-label">登録案件</span>
+          <strong class="stat-value">86</strong>
+          <span class="stat-meta">今週 +9</span>
+        </article>
+        <article class="stat-card">
+          <span class="stat-label">応募中</span>
+          <strong class="stat-value">15</strong>
+          <span class="stat-meta"><a href="projects.html">案件一覧へ</a></span>
+        </article>
+        <article class="stat-card">
+          <span class="stat-label">未処理メール</span>
+          <strong class="stat-value">7</strong>
+          <span class="stat-meta"><a href="emails.html">取込へ</a></span>
+        </article>
+      </section>
+
+      <section class="grid-2">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>最近取り込んだ人材</h2>
+            <a href="talents.html">一覧へ</a>
+          </div>
+          <table class="table">
+            <thead>
+              <tr><th>氏名 / ID</th><th>スキル</th><th>応募中</th><th></th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>T-1042 / 山田 太郎</td>
+                <td>Java / AWS</td>
+                <td><span class="badge badge-brand">2件</span></td>
+                <td><a href="talent-detail.html">詳細</a></td>
+              </tr>
+              <tr>
+                <td>T-1041 / 佐藤 花子</td>
+                <td>React / TypeScript</td>
+                <td><span class="badge badge-muted">0件</span></td>
+                <td><a href="talent-detail.html">詳細</a></td>
+              </tr>
+              <tr>
+                <td>T-1040 / 鈴木 一郎</td>
+                <td>Python / Django</td>
+                <td><span class="badge badge-brand">1件</span></td>
+                <td><a href="talent-detail.html">詳細</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <h2>最近取り込んだ案件</h2>
+            <a href="projects.html">一覧へ</a>
+          </div>
+          <table class="table">
+            <thead>
+              <tr><th>案件名</th><th>必須スキル</th><th>応募者</th><th></th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>P-2208 / 基幹刷新</td>
+                <td>Java / Spring</td>
+                <td><span class="badge badge-brand">3名</span></td>
+                <td><a href="project-detail.html">詳細</a></td>
+              </tr>
+              <tr>
+                <td>P-2207 / ECフロント</td>
+                <td>React / Next.js</td>
+                <td><span class="badge badge-brand">1名</span></td>
+                <td><a href="project-detail.html">詳細</a></td>
+              </tr>
+              <tr>
+                <td>P-2206 / データ基盤</td>
+                <td>Python / AWS</td>
+                <td><span class="badge badge-muted">0名</span></td>
+                <td><a href="project-detail.html">詳細</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </article>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

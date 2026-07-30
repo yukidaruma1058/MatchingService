@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>企業情報を編集 — MatchingService</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">MS</span>
+        <div>
+          <strong>MatchingService</strong>
+          <small>システムイメージ</small>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="nav-item" href="index.html">ダッシュボード</a>
+        <a class="nav-item" href="talents.html">人材一覧</a>
+        <a class="nav-item" href="projects.html">案件一覧</a>
+        <a class="nav-item is-active" href="companies.html">企業一覧</a>
+        <a class="nav-item" href="contacts.html">担当者一覧</a>
+        <a class="nav-item" href="matching.html">マッチング</a>
+        <a class="nav-item" href="emails.html">メール取込</a>
+        <a class="nav-item" href="settings.html">設定</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1>企業情報を編集</h1>
+          <p class="muted">株式会社クラウドネクスト のマスタ情報を更新</p>
+        </div>
+        <div class="topbar-actions">
+          <a class="btn btn-secondary" href="company-detail.html">キャンセル</a>
+          <button class="btn btn-primary" type="submit" form="company-edit-form">保存する（イメージ）</button>
+        </div>
+      </header>
+
+      <p class="notice">
+        企業名・区分・ドメインなどの基本情報を編集します。担当者の変更は <a href="contacts.html">担当者一覧</a> または <a href="contact-new.html">担当者を追加</a> から行ってください。
+      </p>
+
+      <form id="company-edit-form" action="company-detail.html" method="get">
+        <article class="detail-card">
+          <h2>企業情報</h2>
+          <div class="stack">
+            <div class="field">
+              <label for="name">企業名 <span class="required-mark">*</span></label>
+              <input id="name" name="name" type="text" value="株式会社クラウドネクスト" required />
+            </div>
+            <div class="field">
+              <label for="kind">区分 <span class="required-mark">*</span></label>
+              <select id="kind" name="kind" required>
+                <option value="introducer">人材紹介（紹介元）</option>
+                <option value="distributor" selected>案件配信（配信元）</option>
+                <option value="both">両方</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="domain">メールドメイン</label>
+              <input id="domain" name="domain" type="text" value="cloudnext.example" />
+              <p class="muted field-hint">取込メールの送信元ドメインと照合して自動紐付けします。</p>
+            </div>
+            <div class="field">
+              <label for="default_email">既定の返信先メール</label>
+              <input id="default_email" name="default_email" type="email" value="project-desk@cloudnext.example" />
+            </div>
+            <div class="field">
+              <label for="notes">備考</label>
+              <textarea id="notes" name="notes">案件配信が中心。主担当は田村様。</textarea>
+            </div>
+          </div>
+        </article>
+      </form>
+
+      <section class="panel" style="margin-top:16px;">
+        <div class="panel-head">
+          <h2>関連情報（参照のみ）</h2>
+        </div>
+        <dl class="kv" style="padding:0 4px;">
+          <dt>関連案件</dt><dd>12件</dd>
+          <dt>登録担当者</dt><dd>2名（<a href="contacts.html">担当者一覧</a>）</dd>
+        </dl>
+        <div class="flow-links" style="margin-top:12px;">
+          <button class="btn btn-primary" type="submit" form="company-edit-form">保存する（イメージ）</button>
+          <a class="btn btn-ghost" href="company-detail.html">企業詳細へ戻る</a>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

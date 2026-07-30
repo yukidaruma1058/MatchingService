@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SCR-003 人材詳細 — 基本設計</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">MS</span><div><strong>MatchingService</strong><small>基本設計書</small></div></div>
+      <nav class="nav">
+        <a class="nav-item" href="../index.html">一覧</a>
+        <a class="nav-item" href="talents.html">人材一覧</a>
+        <a class="nav-item is-active" href="talent-detail.html">人材詳細</a>
+      </nav>
+    </aside>
+    <main class="main main--bd">
+      <header class="topbar">
+        <div><h1>SCR-003 人材詳細</h1><p class="muted">要約プロフィール・取込元・採点案件・案件提案</p></div>
+        <div class="topbar-actions"><a class="btn btn-secondary" href="../../../システムイメージ/talent-detail.html">画面イメージ</a></div>
+      </header>
+      <div class="bd-meta"><span>画面ID: SCR-003</span><span>URL: /talents/:id</span><span>パラメータ: talent_id</span></div>
+
+      <section class="panel bd-section">
+        <h2>1. 画面概要</h2>
+        <p>1 名の人材について、要約プロフィール・取込元メール・採点されている案件一覧を表示する。旧 SCR-010 経由の「この人材でマッチ」は廃止し、本画面から案件提案（BAT-007）と AI 採点を行う。提案・AI採点は本画面から行う。</p>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>2. 画面遷移</h2>
+        <table class="table flow-table">
+          <tbody>
+            <tr><td>遷移元</td><td>人材一覧、ダッシュボード、案件詳細（要員リンク）、メール取込</td></tr>
+            <tr><td>遷移先</td><td>人材一覧、案件一覧、案件詳細</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>3. 表示項目</h2>
+        <h3>要約プロフィール</h3>
+        <table class="table">
+          <thead><tr><th>項目</th><th>カラム</th></tr></thead>
+          <tbody>
+            <tr><td>氏名・所属・希望単価・稼働・最寄駅・状態・要約</td><td>talents（状態は有効/無効の日本語）</td></tr>
+            <tr><td>配信会社（紹介元）</td><td>companies</td></tr>
+            <tr><td>スキル</td><td>talents.skills</td></tr>
+          </tbody>
+        </table>
+        <h3>取込元</h3>
+        <p>件名、From、ラベル、受信日時</p>
+        <h3>採点されている案件（ルールスコア降順）</h3>
+        <p>直近 match_run における当該人材の案件採点結果。選択して AI 採点、または人材紹介メールへの案件提案（複数選択時は 1 通にまとめ、本文プレビュー編集可）。</p>
+        <h3>応募中の案件（設計上・未実装のまま維持）</h3>
+        <p>applications に基づく応募一覧。現状 UI は採点結果（matches）を主表示とする。</p>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>4. 操作</h2>
+        <ul>
+          <li>選択をAI採点 → <code>POST /api/match-runs/{id}/ai-judge</code></li>
+          <li>選択を人材紹介メールへ提案 → プレビュー後 <code>POST /api/outreach/talent-propose</code>（BAT-007）。本文は設定テンプレート。値なし項目は出力しない。単価は万円正規化</li>
+        </ul>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>5. API・参照 DB</h2>
+        <p><strong>API:</strong> <code>GET /api/talents/:id</code>、<code>GET /api/talents/:id/matches</code>、<code>POST /api/outreach/talent-propose/preview</code>、<code>POST /api/outreach/talent-propose</code></p>
+        <p><strong>DB:</strong> talents, companies, emails, matches, projects, outreach_*</p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SCR-001 ダッシュボード — 基本設計</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">MS</span><div><strong>MatchingService</strong><small>基本設計書</small></div></div>
+      <nav class="nav">
+        <a class="nav-item" href="../index.html">一覧</a>
+        <a class="nav-item is-active" href="dashboard.html">ダッシュボード</a>
+        <a class="nav-item" href="talents.html">人材一覧</a>
+        <a class="nav-item" href="projects.html">案件一覧</a>
+        <a class="nav-item" href="emails.html">メール取込</a>
+        <a class="nav-item" href="settings.html">設定</a>
+      </nav>
+    </aside>
+    <main class="main main--bd">
+      <header class="topbar">
+        <div><h1>SCR-001 ダッシュボード</h1><p class="muted">人材・案件・取込・提案ファネルの概況</p></div>
+        <div class="topbar-actions"><a class="btn btn-secondary" href="../../../システムイメージ/index.html">画面イメージ</a></div>
+      </header>
+      <div class="bd-meta"><span>画面ID: SCR-001</span><span>URL: /</span><span>認証: 将来実装</span></div>
+
+      <section class="panel bd-section">
+        <h2>1. 画面概要</h2>
+        <p>
+          システム全体の状況を把握するホーム画面。KPI カードに加え、期間指定の
+          <strong>供給バランス（積み上げ棒＋企業別）</strong>、
+          <strong>ファネル（取込→OK、制約ロス内訳）</strong>、
+          <strong>スコア帯別 OK率</strong>
+          で実績分析する。
+        </p>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>2. 画面遷移</h2>
+        <table class="table flow-table">
+          <tbody>
+            <tr><td>遷移元</td><td>サイドナビ（全画面）、ログイン後の初期表示</td></tr>
+            <tr><td>遷移先</td><td>人材一覧 / 人材詳細、案件一覧 / 案件詳細、メール取込、企業一覧・企業詳細</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>3. 表示項目</h2>
+        <table class="table">
+          <thead><tr><th>項目</th><th>データソース</th><th>備考</th></tr></thead>
+          <tbody>
+            <tr><td>登録人材数 / 案件数</td><td>talents / projects</td><td>KPI カード</td></tr>
+            <tr><td>振り分け待ち</td><td>Gmail（source label）</td><td><code>GET /api/dashboard/sort-queue</code></td></tr>
+            <tr><td>未処理メール / 提案中</td><td>emails / outreach_messages</td><td>KPI カード</td></tr>
+            <tr>
+              <td>供給バランス</td>
+              <td>emails + outreach</td>
+              <td>
+                積み上げ棒（葉）: 案件・人材未提案 / 案件・人材提案済 / 人材・案件未提案 / 人材・案件提案済 / 振り分け不可。
+                提案済み判定は現在時点。同 Panel に企業別取込 Top8（案件=distributor / 人材=introducer）の横棒。
+              </td>
+            </tr>
+            <tr>
+              <td>ファネル</td>
+              <td>emails → matches → outreach → replies</td>
+              <td>
+                取込 → 提案可能（最新 match_run で score&gt;0）→ 提案済 → 返信あり → OK。
+                制約ロス内訳: 外国籍NG / 商流 / その他スコア0。
+              </td>
+            </tr>
+            <tr>
+              <td>スコア帯別 OK率</td>
+              <td>期間内送信提案 × match.score_band × 返信 judgment</td>
+              <td>横棒。帯未設定は「不明」</td>
+            </tr>
+            <tr><td>最近の処理状況</td><td>emails</td><td>直近取込メール</td></tr>
+          </tbody>
+        </table>
+        <p class="muted">期間は 1週間 / 1か月 / 半年 / 1年（画面上部で共有）。データは <code>GET /api/dashboard?range=&amp;end=</code>。</p>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>4. 操作・イベント</h2>
+        <table class="table">
+          <thead><tr><th>操作</th><th>処理</th></tr></thead>
+          <tbody>
+            <tr><td>初期表示</td><td><code>GET /api/dashboard</code> と <code>GET /api/dashboard/sort-queue</code></td></tr>
+            <tr><td>期間切替・前後ナビ</td><td>供給・ファネル・スコア帯を同じ <code>range</code> / <code>end</code> で再取得</td></tr>
+            <tr><td>供給凡例クリック</td><td>積み上げ系列の表示切替</td></tr>
+            <tr><td>企業名クリック</td><td>企業詳細へ遷移</td></tr>
+            <tr><td>メール取り込み</td><td><code>POST /api/batches/gmail-pipeline</code></td></tr>
+            <tr><td>取込データ削除</td><td><code>POST /api/batches/ingest-cleanup</code></td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>5. 参照 DB</h2>
+        <p>
+          <a href="../../../ER図/index.html#tbl-talents">talents</a>、
+          <a href="../../../ER図/index.html#tbl-projects">projects</a>、
+          <a href="../../../ER図/index.html#tbl-emails">emails</a>、
+          companies、matches、match_runs、outreach_messages、outreach_replies
+        </p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

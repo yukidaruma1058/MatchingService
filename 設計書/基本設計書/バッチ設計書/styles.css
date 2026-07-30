@@ -1,0 +1,97 @@
+@import url("../../システムイメージ/styles.css");
+
+.main--backend {
+  max-width: 1040px;
+}
+
+.backend-section {
+  margin-bottom: 24px;
+}
+
+.backend-section h2 {
+  margin: 0 0 10px;
+  font-size: 1.1rem;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.backend-section h3 {
+  margin: 16px 0 8px;
+  font-size: 0.96rem;
+}
+
+.backend-section p,
+.backend-section li {
+  line-height: 1.65;
+}
+
+.backend-section ul {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.backend-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.backend-meta span {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.flow-steps {
+  display: grid;
+  gap: 10px;
+  counter-reset: flow-step;
+}
+
+.flow-step {
+  position: relative;
+  padding: 12px 12px 12px 42px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.flow-step::before {
+  counter-increment: flow-step;
+  content: counter(flow-step);
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.flow-step strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.api-path {
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.nav-group-label {
+  margin: 16px 0 6px;
+  padding: 0 12px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}

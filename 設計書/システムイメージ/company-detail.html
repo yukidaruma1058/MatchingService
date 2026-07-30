@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>企業詳細 — MatchingService</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">MS</span>
+        <div>
+          <strong>MatchingService</strong>
+          <small>システムイメージ</small>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="nav-item" href="index.html">ダッシュボード</a>
+        <a class="nav-item" href="talents.html">人材一覧</a>
+        <a class="nav-item" href="projects.html">案件一覧</a>
+        <a class="nav-item is-active" href="companies.html">企業一覧</a>
+        <a class="nav-item" href="contacts.html">担当者一覧</a>
+        <a class="nav-item" href="matching.html">マッチング</a>
+        <a class="nav-item" href="emails.html">メール取込</a>
+        <a class="nav-item" href="settings.html">設定</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1>企業詳細 / 株式会社クラウドネクスト</h1>
+          <p class="muted">企業情報と担当者</p>
+        </div>
+        <div class="topbar-actions">
+          <a class="btn btn-secondary" href="companies.html">企業一覧へ</a>
+          <a class="btn btn-primary" href="company-edit.html">企業情報を編集</a>
+        </div>
+      </header>
+
+      <section class="detail-layout">
+        <article class="detail-card">
+          <h2>企業情報</h2>
+          <dl class="kv">
+            <dt>企業名</dt><dd>株式会社クラウドネクスト</dd>
+            <dt>区分</dt><dd><span class="badge badge-brand">案件配信</span></dd>
+            <dt>ドメイン</dt><dd>cloudnext.example</dd>
+            <dt>既定宛先</dt><dd>project-desk@cloudnext.example</dd>
+            <dt>関連案件</dt><dd>12件（例: P-2208 基幹刷新）</dd>
+          </dl>
+          <div class="flow-links">
+            <a class="btn btn-ghost" href="company-edit.html">企業情報を編集</a>
+            <a class="btn btn-ghost" href="projects.html">関連案件</a>
+          </div>
+        </article>
+
+        <article class="detail-card">
+          <h2>担当者</h2>
+          <table class="table">
+            <thead>
+              <tr>
+                <th>氏名</th>
+                <th>メール</th>
+                <th>役割</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>田村 翔</td>
+                <td>project-desk@cloudnext.example</td>
+                <td><span class="badge badge-ok">主担当</span></td>
+                <td><a href="contact-edit.html">編集</a></td>
+              </tr>
+              <tr>
+                <td>石井 奈々</td>
+                <td>n.ishii@cloudnext.example</td>
+                <td><span class="badge badge-muted">副担当</span></td>
+                <td><a href="contact-edit.html">編集</a></td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="flow-links">
+            <a class="btn btn-ghost" href="contact-new.html">担当者を追加</a>
+            <a class="btn btn-ghost" href="contacts.html">担当者一覧</a>
+          </div>
+        </article>
+      </section>
+
+      <section class="panel" style="margin-top:16px;">
+        <h2>提案メール本文について</h2>
+        <p class="muted" style="line-height:1.6;">
+          企業ごとのメールテンプレート編集はありません。提案文面はコード内の固定フォーマット
+          （要員提案: BAT-007 / <code>talent_proposal_body</code>、案件提案: BAT-009）で生成します。
+          要員への案件提案のみ、送信前プレビューで本文を編集できます。
+        </p>
+        <div class="flow-links">
+          <a class="btn btn-ghost" href="matching-send.html">案件への提案送信イメージ</a>
+          <a class="btn btn-ghost" href="projects.html">案件一覧へ</a>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SCR-019 担当者情報編集 — 基本設計</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">MS</span><div><strong>MatchingService</strong><small>基本設計書</small></div></div>
+      <nav class="nav">
+        <a class="nav-item" href="../index.html">一覧</a>
+        <a class="nav-item" href="contacts.html">担当者一覧</a>
+        <a class="nav-item" href="contact-new.html">担当者追加</a>
+        <a class="nav-item is-active" href="contact-edit.html">担当者編集</a>
+      </nav>
+    </aside>
+    <main class="main main--bd">
+      <header class="topbar">
+        <div><h1>SCR-019 担当者情報編集</h1><p class="muted">既存担当者の氏名・連絡先・役割を更新</p></div>
+        <div class="topbar-actions"><a class="btn btn-secondary" href="../../../システムイメージ/contact-edit.html">画面イメージ</a></div>
+      </header>
+      <div class="bd-meta"><span>画面ID: SCR-019</span><span>URL: /contacts/:id/edit</span><span>パラメータ: contact_id</span></div>
+
+      <section class="panel bd-section">
+        <h2>1. 画面概要</h2>
+        <p>登録済み担当者の情報を更新する。所属企業は参照のみ（変更不可）。無効化により送信先から除外できる。</p>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>2. 画面遷移</h2>
+        <table class="table flow-table">
+          <tbody>
+            <tr><td>遷移元</td><td>担当者一覧の「編集」、企業詳細の担当者テーブル「編集」</td></tr>
+            <tr><td>遷移先（保存）</td><td>担当者一覧（または遷移元の企業詳細）</td></tr>
+            <tr><td>遷移先（キャンセル）</td><td>担当者一覧</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>3. 入力項目</h2>
+        <table class="table">
+          <thead><tr><th>項目</th><th>必須</th><th>編集可</th><th>DB</th></tr></thead>
+          <tbody>
+            <tr><td>所属企業</td><td>—</td><td>×（参照のみ）</td><td>companies</td></tr>
+            <tr><td>氏名</td><td>○</td><td>○</td><td>contacts.name</td></tr>
+            <tr><td>メールアドレス</td><td>○</td><td>○</td><td>contacts.email</td></tr>
+            <tr><td>役割</td><td>○</td><td>○</td><td>contacts.role</td></tr>
+            <tr><td>電話番号</td><td>—</td><td>○</td><td>contacts.phone</td></tr>
+            <tr><td>備考</td><td>—</td><td>○</td><td>（将来拡張）</td></tr>
+            <tr><td>有効</td><td>—</td><td>○</td><td>contacts.is_active</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>4. 処理仕様</h2>
+        <ol>
+          <li>初期表示: <code>GET /api/contacts/:id</code></li>
+          <li>保存: バリデーション（企業内メール重複は自レコード除く）後 <code>PUT /api/contacts/:id</code></li>
+          <li>contacts.updated_at 更新、一覧へリダイレクト</li>
+        </ol>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>5. 参照 DB</h2>
+        <p><a href="../../../ER図/index.html#tbl-contacts">contacts</a>、<a href="../../../ER図/index.html#tbl-companies">companies</a></p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

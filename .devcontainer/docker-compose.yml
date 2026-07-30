@@ -1,0 +1,16 @@
+services:
+  devcontainer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    user: root
+    working_dir: /workspace/02_MatchingService/web
+    command: sleep infinity
+    volumes:
+      - ..:/workspace/02_MatchingService
+      - web_node_modules:/workspace/02_MatchingService/web/node_modules
+    ports:
+      - "3000:3000"
+
+volumes:
+  web_node_modules:

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SCR-015 メール取込 — 基本設計</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">MS</span><div><strong>MatchingService</strong><small>基本設計書</small></div></div>
+      <nav class="nav">
+        <a class="nav-item" href="../index.html">一覧</a>
+        <a class="nav-item is-active" href="emails.html">メール取込</a>
+        <a class="nav-item" href="settings.html">設定</a>
+      </nav>
+    </aside>
+    <main class="main main--bd">
+      <header class="topbar">
+        <div><h1>SCR-015 メール取込</h1><p class="muted">Gmail ラベル付きメールの取込・要約状況</p></div>
+        <div class="topbar-actions"><a class="btn btn-secondary" href="../../../システムイメージ/emails.html">画面イメージ</a></div>
+      </header>
+      <div class="bd-meta"><span>画面ID: SCR-015</span><span>URL: /emails</span></div>
+
+      <section class="panel bd-section">
+        <h2>1. 画面概要</h2>
+        <p>Gmail からのメール振り分け・取込バッチの状況を可視化する。手動で即時取込をトリガーでき、各メールの処理状態（未処理・振り分け済・要約済・ルール採点済・LLM判定済）と登録先（人材/案件）を確認する。</p>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>2. 画面遷移</h2>
+        <table class="table flow-table">
+          <tbody>
+            <tr><td>遷移元</td><td>サイドナビ、ダッシュボード（未処理リンク）、人材詳細（元メール）</td></tr>
+            <tr><td>遷移先</td><td>人材/案件詳細、案件一覧、設定</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>3. 表示項目</h2>
+        <h3>KPI</h3>
+        <table class="table">
+          <tbody>
+            <tr><td>本日取込</td><td>人材/案件の内訳</td></tr>
+            <tr><td>未処理</td><td>emails.status=pending 件数</td></tr>
+            <tr><td>LLM 補助判定</td><td>system_settings.ai_assist_enabled</td></tr>
+            <tr><td>次回 cron</td><td>Ofelia スケジュールから算出</td></tr>
+          </tbody>
+        </table>
+        <h3>取込一覧</h3>
+        <p>受信日時、ラベル（人材/案件）、件名、状態、登録先 ID、詳細リンク</p>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>4. 操作</h2>
+        <table class="table">
+          <tbody>
+            <tr><td>今すぐ取込</td><td><code>POST /api/batches/gmail-pipeline</code> で BAT-001 → BAT-002 → BAT-006 → BAT-003 を連鎖起動。ai_assist_enabled が ON なら BAT-004 まで実行</td></tr>
+            <tr><td>再実行</td><td>失敗・未処理メールの再処理</td></tr>
+            <tr><td>設定</td><td>設定画面へ</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>5. バッチ処理（参照）</h2>
+        <ol>
+          <li>① BAT-001 メール振り分け: Gmail API で未処理メールを取得し、案件/要員ラベルを付与</li>
+          <li>② BAT-002 メール取込: ラベル付きメールを AI で要約・JSON 出力し、talents / projects INSERT</li>
+          <li>③ BAT-006 過去データ削除: ingest_data_retention_days を超えた emails を削除（0 でスキップ）</li>
+          <li>④ BAT-003 ルールスコア採点: 全案件に対して要員ごとのルールスコアを算出し、matches INSERT/UPDATE</li>
+          <li>⑤ BAT-004 LLM 補助判定: 設定 ON なら④完了時、設定 OFF なら画面から手動実行</li>
+        </ol>
+        <p><strong>DB:</strong> emails, talents, projects, match_runs, matches, system_settings</p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>案件一覧 — MatchingService</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">MS</span>
+        <div>
+          <strong>MatchingService</strong>
+          <small>システムイメージ</small>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="nav-item" href="index.html">ダッシュボード</a>
+        <a class="nav-item" href="talents.html">人材一覧</a>
+        <a class="nav-item is-active" href="projects.html">案件一覧</a>
+        <a class="nav-item" href="companies.html">企業一覧</a>
+        <a class="nav-item" href="contacts.html">担当者一覧</a>
+        <a class="nav-item" href="matching.html">マッチング</a>
+        <a class="nav-item" href="emails.html">メール取込</a>
+        <a class="nav-item" href="settings.html">設定</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1>案件一覧</h1>
+          <p class="muted">案件の検索・応募状況・マッチング結果を1画面で確認</p>
+        </div>
+        <div class="topbar-actions">
+          <a class="btn btn-primary" href="matching.html">マッチング実行</a>
+        </div>
+      </header>
+
+      <div class="view-tabs">
+        <a class="view-tab is-active" href="projects.html">すべての案件</a>
+        <a class="view-tab" href="projects.html?match=1">マッチ結果あり</a>
+      </div>
+
+      <form class="filter-bar" action="projects.html" method="get">
+        <div class="field grow">
+          <label for="q">キーワード</label>
+          <input id="q" name="q" type="search" placeholder="案件名 / スキル / ID" />
+        </div>
+        <div class="field">
+          <label for="apps">応募</label>
+          <select id="apps" name="apps">
+            <option>すべて</option>
+            <option selected>応募あり</option>
+            <option>応募なし</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="match">マッチ</label>
+          <select id="match" name="match">
+            <option>すべて</option>
+            <option selected>マッチあり</option>
+            <option>未マッチ</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="work">勤務</label>
+          <select id="work" name="work">
+            <option>すべて</option>
+            <option selected>リモート可</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" type="submit">検索</button>
+      </form>
+
+      <section class="panel" style="margin-bottom:16px;">
+        <div class="panel-head">
+          <h2>ルールスコア帯分布（10点刻み）</h2>
+          <span class="muted">直近ルール採点: 要員 48名</span>
+        </div>
+        <div class="score-chart" aria-label="スコア帯ごとの人数棒グラフ">
+          <div class="score-bar-row">
+            <span class="score-bar-label">90–100</span>
+            <div class="score-bar-track"><span class="score-bar-fill" style="width:75%"></span></div>
+            <span class="score-bar-count">12</span>
+          </div>
+          <div class="score-bar-row">
+            <span class="score-bar-label">80–89</span>
+            <div class="score-bar-track"><span class="score-bar-fill" style="width:100%"></span></div>
+            <span class="score-bar-count">16</span>
+          </div>
+          <div class="score-bar-row">
+            <span class="score-bar-label">70–79</span>
+            <div class="score-bar-track"><span class="score-bar-fill" style="width:62%"></span></div>
+            <span class="score-bar-count">10</span>
+          </div>
+          <div class="score-bar-row">
+            <span class="score-bar-label">60–69</span>
+            <div class="score-bar-track"><span class="score-bar-fill" style="width:38%"></span></div>
+            <span class="score-bar-count">6</span>
+          </div>
+          <div class="score-bar-row">
+            <span class="score-bar-label">50–59</span>
+            <div class="score-bar-track"><span class="score-bar-fill" style="width:19%"></span></div>
+            <span class="score-bar-count">3</span>
+          </div>
+          <div class="score-bar-row">
+            <span class="score-bar-label">〜49</span>
+            <div class="score-bar-track"><span class="score-bar-fill is-muted" style="width:6%"></span></div>
+            <span class="score-bar-count">1</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>案件</h2>
+          <span class="muted">86件（マッチあり 8件）</span>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>案件名</th>
+                <th>配信元会社</th>
+                <th>必須スキル</th>
+                <th>単価</th>
+                <th>応募人数</th>
+                <th>マッチ要員</th>
+                <th>最高ルールスコア</th>
+                <th>ルールスコア帯</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>P-2208</td>
+                <td><a href="project-detail.html">基幹刷新</a></td>
+                <td><a href="company-detail.html">株式会社クラウドネクスト</a></td>
+                <td>Java / Spring / AWS</td>
+                <td>80万</td>
+                <td><strong>3</strong>名</td>
+                <td>9名</td>
+                <td><strong>94</strong></td>
+                <td>
+                  <div class="mini-bars" title="90台:4 / 80台:3 / 70台:2">
+                    <span style="height:90%"></span>
+                    <span style="height:70%"></span>
+                    <span style="height:45%"></span>
+                    <span style="height:20%"></span>
+                    <span style="height:10%"></span>
+                  </div>
+                </td>
+                <td>
+                  <div class="stack">
+                    <a href="project-detail.html">詳細</a>
+                    <a href="matching-detail.html">マッチング詳細</a>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td>P-2207</td>
+                <td><a href="project-detail.html">ECフロント刷新</a></td>
+                <td><a href="company-detail.html">株式会社フロントラボ</a></td>
+                <td>React / Next.js / TS</td>
+                <td>72万</td>
+                <td><strong>1</strong>名</td>
+                <td>5名</td>
+                <td><strong>82</strong></td>
+                <td>
+                  <div class="mini-bars">
+                    <span style="height:10%"></span>
+                    <span style="height:60%"></span>
+                    <span style="height:55%"></span>
+                    <span style="height:35%"></span>
+                    <span style="height:15%"></span>
+                  </div>
+                </td>
+                <td>
+                  <div class="stack">
+                    <a href="project-detail.html">詳細</a>
+                    <a href="matching-detail.html">マッチング詳細</a>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td>P-2206</td>
+                <td><a href="project-detail.html">データ基盤</a></td>
+                <td><a href="company-detail.html">株式会社データワークス</a></td>
+                <td>Python / AWS</td>
+                <td>78万</td>
+                <td><span class="badge badge-muted">0名</span></td>
+                <td>7名</td>
+                <td><strong>89</strong></td>
+                <td>
+                  <div class="mini-bars">
+                    <span style="height:50%"></span>
+                    <span style="height:80%"></span>
+                    <span style="height:55%"></span>
+                    <span style="height:25%"></span>
+                    <span style="height:5%"></span>
+                  </div>
+                </td>
+                <td>
+                  <div class="stack">
+                    <a href="project-detail.html">詳細</a>
+                    <a href="matching-detail.html">マッチング詳細</a>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td>P-2199</td>
+                <td><a href="project-detail.html">決済基盤改修</a></td>
+                <td><a href="company-detail.html">株式会社クラウドネクスト</a></td>
+                <td>Java / 決済</td>
+                <td>75万</td>
+                <td><strong>2</strong>名</td>
+                <td>6名</td>
+                <td><strong>91</strong></td>
+                <td>
+                  <div class="mini-bars">
+                    <span style="height:70%"></span>
+                    <span style="height:65%"></span>
+                    <span style="height:40%"></span>
+                    <span style="height:20%"></span>
+                    <span style="height:8%"></span>
+                  </div>
+                </td>
+                <td>
+                  <div class="stack">
+                    <a href="project-detail.html">詳細</a>
+                    <a href="matching-detail.html">マッチング詳細</a>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td>P-2188</td>
+                <td><a href="project-detail.html">社内ツール保守</a></td>
+                <td><a href="company-detail.html">株式会社アプリット</a></td>
+                <td>PHP / Laravel</td>
+                <td>65万</td>
+                <td><span class="badge badge-muted">0名</span></td>
+                <td><span class="muted">—</span></td>
+                <td><span class="muted">—</span></td>
+                <td><span class="muted">—</span></td>
+                <td>
+                  <div class="stack">
+                    <a href="project-detail.html">詳細</a>
+                    <a class="btn btn-ghost" href="matching.html" style="padding:6px 10px;font-size:0.85rem;">マッチ実行</a>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

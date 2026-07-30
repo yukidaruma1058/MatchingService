@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>設定（Gmail未設定） — MatchingService</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">MS</span>
+        <div>
+          <strong>MatchingService</strong>
+          <small>システムイメージ</small>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="nav-item" href="index.html">ダッシュボード</a>
+        <a class="nav-item" href="talents.html">人材一覧</a>
+        <a class="nav-item" href="projects.html">案件一覧</a>
+        <a class="nav-item" href="companies.html">企業一覧</a>
+        <a class="nav-item" href="contacts.html">担当者一覧</a>
+        <a class="nav-item" href="matching.html">マッチング</a>
+        <a class="nav-item" href="emails.html">メール取込</a>
+        <a class="nav-item is-active" href="settings-gmail-setup.html">設定</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1>設定</h1>
+          <p class="muted">Gmail OAuth クライアント未設定時の画面イメージ（SCR-016）</p>
+        </div>
+        <div class="topbar-actions">
+          <a class="btn btn-secondary" href="settings.html">連携済みイメージへ</a>
+          <a class="btn btn-primary" href="settings-gmail-setup.html">保存（イメージ）</a>
+        </div>
+      </header>
+
+      <section class="grid-2">
+        <article class="detail-card">
+          <h2>バッチ / AI採点</h2>
+          <div class="field schedule-settings">
+            <label>取込時間</label>
+            <div class="schedule-time-list">
+              <input type="time" value="08:00" />
+              <input type="time" value="12:00" />
+            </div>
+          </div>
+          <div class="field retention-settings">
+            <label for="ingest-retention-days">取込データの保持</label>
+            <div class="score-input-row">
+              <input id="ingest-retention-days" type="number" min="0" max="3650" value="0" />
+              <span class="score-input-suffix">日前より古いデータを削除</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="detail-card">
+          <h2>Gmail / AI</h2>
+
+          <div class="state-switcher">
+            <a class="btn btn-ghost" href="settings.html">Gmail 連携済み</a>
+            <a class="btn btn-secondary is-active" href="settings-gmail-setup.html">Gmail 未設定（初回連携）</a>
+          </div>
+
+          <div class="settings-subsection">
+            <h3 class="settings-subsection-title">
+              Gmail 初回連携
+              <span class="help-tooltip-trigger" title="Google Cloud Console で Gmail API を有効化し、OAuth クライアントを作成します。テスト中はテストユーザー登録が必要です。">?</span>
+            </h3>
+            <p class="muted field-help-block">
+              OAuth クライアント（Client ID / Secret）が未設定のときに表示されます。
+              <code>credentials.json</code> や <code>.env</code> で設定済みの場合はこのフォームは出ません。
+            </p>
+            <div class="field">
+              <label for="redirect-uri">リダイレクト URI（Google Cloud に登録）</label>
+              <div class="copyable-readonly">
+                <input id="redirect-uri" readonly value="http://localhost:8000/api/gmail/oauth/callback" />
+                <button class="btn btn-secondary" type="button">コピー</button>
+              </div>
+              <p class="muted field-help-block">ローカル開発時は localhost の URI が自動表示されます。</p>
+            </div>
+            <div class="field">
+              <label for="oauth-client-id">OAuth Client ID</label>
+              <input id="oauth-client-id" placeholder="xxxx.apps.googleusercontent.com" />
+            </div>
+            <div class="field">
+              <label for="oauth-client-secret">OAuth Client Secret</label>
+              <input id="oauth-client-secret" type="password" placeholder="GOCSPX-..." />
+            </div>
+            <div class="field">
+              <label for="oauth-project-id">Google Cloud Project ID（任意）</label>
+              <input id="oauth-project-id" value="matching-service" />
+            </div>
+            <button class="btn btn-primary" type="button">Gmailと連携する</button>
+          </div>
+
+          <div class="integration-status">
+            <div>
+              <span class="badge badge-warn">Gmail 未連携</span>
+              <strong>未連携</strong>
+              <small>最終確認: 2026/07/13 10:30</small>
+              <small>エラー: ERR-0018</small>
+            </div>
+          </div>
+
+          <div class="settings-subsection">
+            <h3>振り分けバッチ（BAT-001）</h3>
+            <p class="muted field-help-block">Gmail 未連携でもラベル設定は保存できます。連携後のバッチ実行に使用されます。</p>
+            <div class="field" style="margin-bottom:12px;">
+              <label for="sort-source-label">振り分け対象のラベル</label>
+              <input id="sort-source-label" value="SES未振り分け" />
+            </div>
+            <div class="settings-field-grid">
+              <div class="field">
+                <label for="sort-talent-label">人材用ラベル</label>
+                <input id="sort-talent-label" value="SES人材紹介" />
+              </div>
+              <div class="field">
+                <label for="sort-project-label">案件用ラベル</label>
+                <input id="sort-project-label" value="SES案件配信" />
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-subsection">
+            <h3>取込・要約バッチ（BAT-002）</h3>
+            <div class="settings-field-grid">
+              <div class="field">
+                <label for="processed-talent-label">処理済みラベル（人材用）</label>
+                <input id="processed-talent-label" value="SES人材紹介（処理済み）" />
+              </div>
+              <div class="field">
+                <label for="processed-project-label">処理済みラベル（案件用）</label>
+                <input id="processed-project-label" value="SES案件配信（処理済み）" />
+              </div>
+            </div>
+          </div>
+
+        </article>
+      </section>
+
+      <section class="panel" style="margin-top:16px;">
+        <div class="panel-head">
+          <h2>表示条件（実装メモ）</h2>
+        </div>
+        <ul class="steps-list">
+          <li><code>gmail_setup_required: true</code> のとき「Gmail 初回連携」フォーム（Client ID / Secret 入力）を表示</li>
+          <li>Client ID 設定済みで <code>token.json</code> 未作成のときはフォーム非表示、「Gmailと連携する」ボタンのみ</li>
+          <li>連携完了後は <a href="settings.html">settings.html（連携済みイメージ）</a> の表示に切り替わる</li>
+        </ul>
+      </section>
+
+      <section class="panel" style="margin-top:16px;">
+        <div class="panel-head">
+          <h2>画面マップ（遷移確認用）</h2>
+        </div>
+        <div class="flow-links">
+          <a class="btn btn-ghost" href="settings.html">設定（連携済み）</a>
+          <a class="btn btn-ghost" href="settings-gmail-setup.html">設定（Gmail未設定）</a>
+          <a class="btn btn-ghost" href="../基本設計書/画面設計書/screens/settings.html">SCR-016 基本設計</a>
+          <a class="btn btn-ghost" href="index.html">ダッシュボード</a>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

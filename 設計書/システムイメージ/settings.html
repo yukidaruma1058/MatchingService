@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>設定 — MatchingService</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">MS</span>
+        <div>
+          <strong>MatchingService</strong>
+          <small>システムイメージ</small>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="nav-item" href="index.html">ダッシュボード</a>
+        <a class="nav-item" href="talents.html">人材一覧</a>
+        <a class="nav-item" href="projects.html">案件一覧</a>
+        <a class="nav-item" href="companies.html">企業一覧</a>
+        <a class="nav-item" href="contacts.html">担当者一覧</a>
+        <a class="nav-item" href="matching.html">マッチング</a>
+        <a class="nav-item" href="emails.html">メール取込</a>
+        <a class="nav-item is-active" href="settings.html">設定</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1>設定</h1>
+          <p class="muted">取込・AI採点・提案メールの設定</p>
+        </div>
+        <div class="topbar-actions">
+          <a class="btn btn-secondary" href="index.html">ダッシュボードへ</a>
+          <a class="btn btn-primary" href="settings.html">保存（イメージ）</a>
+        </div>
+      </header>
+
+      <section class="grid-2">
+        <article class="detail-card">
+          <h2>バッチ / AI採点</h2>
+          <div class="toggle-row">
+            <div class="toggle-copy">
+              <strong>ルール上位候補にAI判定を行う</strong>
+              <span>ON の場合はルール採点完了時に自動実行。OFF の場合は画面から手動実行します。</span>
+            </div>
+            <label class="switch" title="AI補助判定">
+              <input type="checkbox" checked />
+              <span></span>
+            </label>
+          </div>
+          <div class="ai-assist-options">
+            <div class="score-threshold-box">
+              <div class="field score-threshold-field">
+                <label for="ai-top-n">AI判定対象</label>
+                <div class="score-input-row">
+                  <span class="score-input-prefix">ルールスコア上位</span>
+                  <input id="ai-top-n" type="number" min="1" max="20" step="1" value="5" />
+                  <span class="score-input-suffix">人</span>
+                </div>
+              </div>
+              <p class="muted score-threshold-note">AI判定が ON の場合だけ表示・適用。案件ごとにルールスコア上位 5 人だけ LLM 判定・理由生成を行います。ルールスコアによる足切りラインは設けません。</p>
+            </div>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-copy">
+              <strong>自動で応募メールまで送る</strong>
+              <span>OFF 推奨。マッチ結果を確認してから手動送信します。</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" />
+              <span></span>
+            </label>
+          </div>
+          <div class="field schedule-settings">
+            <label>取込時間</label>
+            <div class="schedule-time-list">
+              <input type="time" value="08:00" />
+              <input type="time" value="12:00" />
+            </div>
+            <div class="schedule-actions">
+              <button class="btn btn-secondary" type="button">保存</button>
+              <button class="btn btn-ghost add-ingest-time" type="button">取込時間を追加</button>
+            </div>
+          </div>
+          <div class="field retention-settings">
+            <label for="ingest-retention-days">取込データの保持</label>
+            <div class="score-input-row">
+              <input id="ingest-retention-days" type="number" min="0" max="3650" value="0" />
+              <span class="score-input-suffix">日前より古いデータを削除</span>
+            </div>
+            <p class="muted field-help-block">0 を指定すると自動削除しません。BAT-006 が取込パイプライン③で実行されます。</p>
+          </div>
+        </article>
+
+        <article class="detail-card">
+          <h2>Gmail / AI</h2>
+
+          <div class="state-switcher">
+            <a class="btn btn-secondary is-active" href="settings.html">Gmail 連携済み</a>
+            <a class="btn btn-ghost" href="settings-gmail-setup.html">Gmail 未設定（初回連携）</a>
+          </div>
+
+          <div class="integration-status">
+            <div>
+              <span class="badge badge-ok">Gmail 連携済み</span>
+              <strong>ses-matching@example.com</strong>
+              <small>最終確認: 2026/07/09 22:45</small>
+            </div>
+            <a class="btn btn-ghost" href="settings.html">再連携（イメージ）</a>
+          </div>
+
+          <div class="settings-subsection">
+            <h3>振り分けバッチ（BAT-001）</h3>
+            <p class="muted field-help-block">未処理メールを人材用 / 案件用ラベルへ振り分けます。</p>
+            <div class="field" style="margin-bottom:12px;">
+              <label for="sort-source-label">振り分け対象のラベル</label>
+              <input id="sort-source-label" value="SES未振り分け" />
+            </div>
+            <div class="settings-field-grid">
+              <div class="field">
+                <label for="sort-talent-label">人材用ラベル</label>
+                <input id="sort-talent-label" value="SES人材紹介" />
+              </div>
+              <div class="field">
+                <label for="sort-project-label">案件用ラベル</label>
+                <input id="sort-project-label" value="SES案件配信" />
+              </div>
+            </div>
+            <div class="settings-field-grid" style="margin-top:12px;">
+              <div class="field">
+                <label for="sort-keywords-talent">振り分け用の検索ワード（要員）</label>
+                <textarea id="sort-keywords-talent" rows="4">人材
+要員
+スキルシート
+ご紹介</textarea>
+              </div>
+              <div class="field">
+                <label for="sort-keywords-project">振り分け用の検索ワード（案件）</label>
+                <textarea id="sort-keywords-project" rows="4">案件
+募集
+開発
+お問い合わせ</textarea>
+              </div>
+            </div>
+            <div class="field" style="margin-top:12px;">
+              <label for="sort-unknown-label">判別不能な場合の振り分けラベル</label>
+              <input id="sort-unknown-label" value="SES要確認" />
+            </div>
+          </div>
+
+          <div class="settings-subsection">
+            <h3>取込・要約バッチ（BAT-002）</h3>
+            <p class="muted field-help-block">人材用 / 案件用ラベル付きメールを DB に取り込み・要約したあと、処理済みラベルへ移動します。</p>
+            <div class="settings-field-grid">
+              <div class="field">
+                <label for="processed-talent-label">処理済みラベル（人材用）</label>
+                <input id="processed-talent-label" value="SES人材紹介（処理済み）" />
+              </div>
+              <div class="field">
+                <label for="processed-project-label">処理済みラベル（案件用）</label>
+                <input id="processed-project-label" value="SES案件配信（処理済み）" />
+              </div>
+            </div>
+            <p class="muted field-help-block">取込元: 人材用=SES人材紹介 / 案件用=SES案件配信</p>
+          </div>
+
+          <div class="field">
+            <label for="from">応募メール送信元</label>
+            <input id="from" value="noreply@matchingservice.local" />
+          </div>
+        </article>
+      </section>
+
+      <section class="panel" style="margin-top:16px;">
+        <div class="panel-head">
+          <h2>画面マップ（遷移確認用）</h2>
+        </div>
+        <div class="flow-links">
+          <a class="btn btn-ghost" href="../基本設計書/画面設計書/index.html">画面設計書</a>
+          <a class="btn btn-ghost" href="../基本設計書/バッチ設計書/index.html">バッチ設計書</a>
+          <a class="btn btn-ghost" href="../基本設計書/共通機能/index.html">共通機能</a>
+          <a class="btn btn-ghost" href="../エラーコード一覧/index.html">エラーコード一覧</a>
+          <a class="btn btn-ghost" href="../システム要件/index.html">技術選定</a>
+          <a class="btn btn-ghost" href="../ER図/index.html">DB ER図</a>
+          <a class="btn btn-ghost" href="index.html">ダッシュボード</a>
+          <a class="btn btn-ghost" href="talents.html">人材一覧</a>
+          <a class="btn btn-ghost" href="talent-detail.html">人材詳細</a>
+          <a class="btn btn-ghost" href="projects.html">案件一覧</a>
+          <a class="btn btn-ghost" href="project-detail.html">案件詳細</a>
+          <a class="btn btn-ghost" href="companies.html">企業一覧</a>
+          <a class="btn btn-ghost" href="company-new.html">企業を追加</a>
+          <a class="btn btn-ghost" href="company-detail.html">企業詳細</a>
+          <a class="btn btn-ghost" href="company-edit.html">企業情報編集</a>
+          <a class="btn btn-ghost" href="contacts.html">担当者一覧</a>
+          <a class="btn btn-ghost" href="contact-new.html">担当者を追加</a>
+          <a class="btn btn-ghost" href="contact-edit.html">担当者編集</a>
+          <a class="btn btn-ghost" href="matching.html">マッチング</a>
+          <a class="btn btn-ghost" href="projects.html">案件一覧（マッチ結果統合）</a>
+          <a class="btn btn-ghost" href="matching-detail.html">マッチング詳細（要員スコア）</a>
+          <a class="btn btn-ghost" href="matching-send.html">テンプレ送信確認</a>
+          <a class="btn btn-ghost" href="emails.html">メール取込</a>
+          <a class="btn btn-ghost" href="../ER図/index.html">DB ER図</a>
+          <a class="btn btn-ghost" href="settings.html">設定（連携済み）</a>
+          <a class="btn btn-ghost" href="settings-gmail-setup.html">設定（Gmail未設定）</a>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script>
+    document.querySelector(".add-ingest-time")?.addEventListener("click", () => {
+      const list = document.querySelector(".schedule-time-list");
+      if (!list) return;
+      const input = document.createElement("input");
+      input.type = "time";
+      list.appendChild(input);
+    });
+  </script>
+</body>
+</html>

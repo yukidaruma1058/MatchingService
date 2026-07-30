@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>基本設計書 — MatchingService</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">MS</span>
+        <div>
+          <strong>MatchingService</strong>
+          <small>基本設計書</small>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="nav-item is-active" href="index.html">一覧</a>
+        <p class="nav-group-label">コア</p>
+        <a class="nav-item" href="screens/dashboard.html">ダッシュボード</a>
+        <a class="nav-item" href="screens/talents.html">人材一覧</a>
+        <a class="nav-item" href="screens/talent-detail.html">人材詳細</a>
+        <a class="nav-item" href="screens/projects.html">案件一覧</a>
+        <a class="nav-item" href="screens/project-detail.html">案件詳細</a>
+        <p class="nav-group-label">マスタ</p>
+        <a class="nav-item" href="screens/companies.html">企業一覧</a>
+        <a class="nav-item" href="screens/company-new.html">企業追加</a>
+        <a class="nav-item" href="screens/company-detail.html">企業詳細</a>
+        <a class="nav-item" href="screens/company-edit.html">企業情報編集</a>
+        <a class="nav-item" href="screens/contacts.html">担当者一覧</a>
+        <a class="nav-item" href="screens/contact-new.html">担当者追加</a>
+        <a class="nav-item" href="screens/contact-edit.html">担当者編集</a>
+        <p class="nav-group-label">運用</p>
+        <a class="nav-item" href="screens/emails.html">メール取込</a>
+        <a class="nav-item" href="screens/settings.html">設定</a>
+        <p class="nav-group-label">廃止</p>
+        <a class="nav-item" href="screens/matching.html">マッチング（廃止）</a>
+        <a class="nav-item" href="screens/matching-detail.html">マッチング詳細（廃止）</a>
+        <a class="nav-item" href="screens/matching-send.html">案件への提案送信（廃止）</a>
+      </nav>
+      <p class="sidebar-note" style="margin-top:16px;">
+        <a href="../バッチ設計書/index.html">バッチ設計書</a><br />
+        <a href="../共通機能/index.html">共通機能</a><br />
+        <a href="../../エラーコード一覧/index.html">エラーコード一覧</a><br />
+        <a href="../../システム要件/index.html">技術選定</a><br />
+        <a href="../../ER図/index.html">DB ER図</a><br />
+        <a href="../../システムイメージ/index.html">画面イメージ</a>
+      </p>
+    </aside>
+
+    <main class="main main--bd">
+      <header class="topbar">
+        <div>
+          <h1>画面基本設計書 一覧</h1>
+          <p class="muted">各画面の目的・項目・遷移・処理・参照 DB を定義</p>
+        </div>
+        <div class="topbar-actions">
+          <a class="btn btn-secondary" href="../../システムイメージ/index.html">画面イメージ</a>
+        </div>
+      </header>
+
+      <section class="panel bd-section">
+        <div class="panel-head"><h2>画面一覧</h2></div>
+        <div class="table-wrap">
+          <table class="table screen-index-table">
+            <thead>
+              <tr>
+                <th>画面ID</th>
+                <th>画面名</th>
+                <th>概要</th>
+                <th>設計書</th>
+                <th>イメージ</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>SCR-001</code></td><td>ダッシュボード</td><td>登録件数・未処理・最近の取込を一覧</td>
+                <td><a href="screens/dashboard.html">基本設計</a></td>
+                <td><a href="../../システムイメージ/index.html">画面</a></td>
+              </tr>
+              <tr>
+                <td><code>SCR-002</code></td><td>人材一覧</td><td>要約済み人材の検索・一覧</td>
+                <td><a href="screens/talents.html">基本設計</a></td>
+                <td><a href="../../システムイメージ/talents.html">画面</a></td>
+              </tr>
+              <tr>
+                <td><code>SCR-003</code></td><td>人材詳細</td><td>プロフィール・取込元・応募中案件</td>
+                <td><a href="screens/talent-detail.html">基本設計</a></td>
+                <td><a href="../../システムイメージ/talent-detail.html">画面</a></td>
+              </tr>
+              <tr>
+                <td><code>SCR-004</code></td><td>案件一覧</td><td>案件検索・マッチ結果・スコア帯</td>
+                <td><a href="screens/projects.html">基本設計</a></td>
+                <td><a href="../../システムイメージ/projects.html">画面</a></td>
+              </tr>
+              <tr>
+                <td><code>SCR-005</code></td><td>案件詳細</td><td>案件情報・応募人材一覧</td>
+                <td><a href="screens/project-detail.html">基本設計</a></td>
+                <td><a href="../../システムイメージ/project-detail.html">画面</a></td>
+              </tr>
+              <tr>
+                <td><code>SCR-006</code></td><td>企業一覧</td><td>紹介元・配信元企業マスタ</td>
+                <td><a href="screens/companies.html">基本設計</a></td>
+                <td><a href="../../システムイメージ/companies.html">画面</a></td>
+              </tr>
+              <tr>
+                <td><code>SCR-007</code></td><td>企業追加</td><td>新規企業・主担当の登録</td>
+                <td><a href="screens/company-new.html">基本設計</a></td>
+                <td><a href="../../システムイメージ/company-new.html">画面</a></td>
+              </tr>
+              <tr>
+                <td><code>SCR-008</code></td><td>企業詳細</td><td>企業情報・担当者の参照</td>
+                <td><a href="screens/company-detail.html">基本設計</a></td>
+                <td><a href="../../システムイメージ/company-detail.html">画面</a></td>
+              </tr>
+              <tr>
+                <td><code>SCR-018</code></td><td>企業情報編集</td><td>企業マスタ基本情報の更新</td>
+                <td><a href="screens/company-edit.html">基本設計</a></td>
+                <td><a href="../../システムイメージ/company-edit.html">画面</a></td>
+              </tr>
+              <tr>
+                <td><code>SCR-009</code></td><td>担当者一覧</td><td>企業別担当者の検索・一覧</td>
+                <td><a href="screens/contacts.html">基本設計</a></td>
+                <td><a href="../../システムイメージ/contacts.html">画面</a></td>
+              </tr>
+              <tr>
+                <td><code>SCR-017</code></td><td>担当者追加</td><td>企業に紐づく担当者の新規登録</td>
+                <td><a href="screens/contact-new.html">基本設計</a></td>
+                <td><a href="../../システムイメージ/contact-new.html">画面</a></td>
+              </tr>
+              <tr>
+                <td><code>SCR-019</code></td><td>担当者情報編集</td><td>担当者の氏名・連絡先・役割の更新</td>
+                <td><a href="screens/contact-edit.html">基本設計</a></td>
+                <td><a href="../../システムイメージ/contact-edit.html">画面</a></td>
+              </tr>
+              <tr>
+                <td><code>SCR-010</code></td><td>マッチング（廃止）</td><td>旧・手動マッチング実行画面。機能は案件一覧のルール採点へ移管</td>
+                <td><a href="screens/matching.html">基本設計</a></td>
+                <td><a href="../../システムイメージ/matching.html">画面（参考）</a></td>
+              </tr>
+              <tr>
+                <td><code>SCR-011</code></td><td>マッチング詳細（廃止）</td><td>旧・案件別スコア専用画面。機能は案件詳細へ統合</td>
+                <td><a href="screens/matching-detail.html">基本設計</a></td>
+                <td><a href="../../システムイメージ/matching-detail.html">画面（参考）</a></td>
+              </tr>
+              <tr>
+                <td><code>SCR-012</code></td><td>案件への提案送信（廃止）</td><td>旧・専用送信画面。機能は案件詳細の提案操作へ統合</td>
+                <td><a href="screens/matching-send.html">基本設計</a></td>
+                <td><a href="../../システムイメージ/matching-send.html">画面（参考）</a></td>
+              </tr>
+              <tr>
+                <td><code>SCR-013</code></td><td>応募メール送信（廃止）</td><td>旧・1人材×1案件の応募メール画面。未実装のまま削除</td>
+                <td>—</td>
+                <td>—</td>
+              </tr>
+              <tr>
+                <td><code>SCR-014</code></td><td>送信完了（廃止）</td><td>旧・提案・応募メール送信後の完了表示。未実装のまま削除</td>
+                <td>—</td>
+                <td>—</td>
+              </tr>
+              <tr>
+                <td><code>SCR-015</code></td><td>メール取込</td><td>Gmail 取込状況・手動実行</td>
+                <td><a href="screens/emails.html">基本設計</a></td>
+                <td><a href="../../システムイメージ/emails.html">画面</a></td>
+              </tr>
+              <tr>
+                <td><code>SCR-016</code></td><td>設定</td><td>バッチ・マッチ・Gmail・AI 設定</td>
+                <td><a href="screens/settings.html">基本設計</a></td>
+                <td>
+                  <a href="../../システムイメージ/settings.html">連携済み</a>
+                  /
+                  <a href="../../システムイメージ/settings-gmail-setup.html">Gmail未設定</a>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel bd-section">
+        <div class="panel-head"><h2>主要画面遷移</h2></div>
+        <pre class="muted" style="margin:0;line-height:1.7;font-size:0.88rem;overflow:auto;">ダッシュボード ─┬─ 人材一覧 ── 人材詳細 ── 案件提案プレビュー／送信（BAT-007）
+                ├─ 案件一覧（ルール採点実行）── 案件詳細 ── AI採点・案件側提案（BAT-009）
+                ├─ 企業一覧 ── 企業追加 ── 企業詳細 ── 企業情報編集
+                ├─ 担当者一覧 ── 担当者追加 / 担当者編集
+                ├─ メール取込
+                └─ 設定（Gmail / 振り分け / テンプレ / スキルマスタ 等）
+
+※ SCR-010 マッチング・SCR-011 マッチング詳細・SCR-012 案件への提案送信・SCR-013 応募メール・SCR-014 送信完了は廃止。
+  ルール採点は案件一覧、案件別スコア／案件側提案は案件詳細、要員への案件提案は人材詳細。</pre>
+      </section>
+
+      <section class="panel bd-section">
+        <div class="panel-head"><h2>画面共通の処理開始前チェック</h2></div>
+        <p>
+          画面側は API 呼び出しや画面遷移の前に以下を必ず確認し、検知可能なエラーは画面で止める。
+          表示するコードとメッセージは <a href="../../エラーコード一覧/index.html">エラーコード一覧</a> に従う。
+        </p>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>タイミング</th><th>チェック内容</th><th>エラーコード</th><th>処理方針</th></tr></thead>
+            <tbody>
+              <tr><td>保存・送信前</td><td>必須入力、形式、文字数、数値範囲</td><td><code>ERR-0001</code>〜<code>ERR-0003</code></td><td>該当項目を強調し、API 呼び出し前に停止</td></tr>
+              <tr><td>対象操作前</td><td>送信対象・マッチング対象・削除対象の選択有無</td><td><code>ERR-0004</code></td><td>対象選択を促す</td></tr>
+              <tr><td>検索前</td><td>検索条件の組み合わせ、日付範囲</td><td><code>ERR-0005</code></td><td>検索実行前に停止</td></tr>
+              <tr><td>メール送信前</td><td>宛先/CC/BCC の入力有無とメール形式</td><td><code>ERR-0006</code></td><td>送信ボタンを押せない状態にする</td></tr>
+              <tr><td>ボタン押下時</td><td>処理中フラグ、二重クリック、同一リクエスト多重送信</td><td><code>ERR-0007</code></td><td>ボタンを disabled にし、完了まで再実行不可</td></tr>
+              <tr><td>画面遷移前</td><td>未保存変更の有無</td><td><code>ERR-0008</code></td><td>確認ダイアログを表示</td></tr>
+              <tr><td>API 応答受信時</td><td><code>error_code</code> の有無</td><td><code>ERR-0011</code> 以降</td><td>コードに対応するメッセージを表示し、必要に応じて再読み込み・再連携へ誘導</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel bd-section">
+        <div class="panel-head"><h2>設計書の記載項目</h2></div>
+        <ul>
+          <li><strong>画面概要</strong> — 目的と利用者の操作シナリオ</li>
+          <li><strong>画面遷移</strong> — 遷移元・遷移先・パラメータ</li>
+          <li><strong>表示項目</strong> — ラベル・データソース・表示形式</li>
+          <li><strong>入力・操作</strong> — ボタン・フォーム・バリデーション</li>
+          <li><strong>処理仕様</strong> — イベント時の API / バッチ連携</li>
+          <li><strong>エラー処理</strong> — 処理開始前チェックと表示するエラーコード</li>
+          <li><strong>参照 DB</strong> — 関連テーブル（<a href="../../ER図/index.html">ER 図</a>）</li>
+        </ul>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

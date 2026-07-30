@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>企業を追加 — MatchingService</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">MS</span>
+        <div>
+          <strong>MatchingService</strong>
+          <small>システムイメージ</small>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="nav-item" href="index.html">ダッシュボード</a>
+        <a class="nav-item" href="talents.html">人材一覧</a>
+        <a class="nav-item" href="projects.html">案件一覧</a>
+        <a class="nav-item is-active" href="companies.html">企業一覧</a>
+        <a class="nav-item" href="contacts.html">担当者一覧</a>
+        <a class="nav-item" href="matching.html">マッチング</a>
+        <a class="nav-item" href="emails.html">メール取込</a>
+        <a class="nav-item" href="settings.html">設定</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1>企業を追加</h1>
+          <p class="muted">人材紹介元・案件配信元の企業マスタを新規登録</p>
+        </div>
+        <div class="topbar-actions">
+          <a class="btn btn-secondary" href="companies.html">キャンセル</a>
+          <button class="btn btn-primary" type="submit" form="company-form">登録する（イメージ）</button>
+        </div>
+      </header>
+
+      <p class="notice">
+        必須項目を入力して登録します。登録後は企業詳細画面へ遷移します。
+      </p>
+
+      <form id="company-form" class="detail-layout" action="company-detail.html" method="get">
+        <article class="detail-card">
+          <h2>企業情報</h2>
+          <div class="stack">
+            <div class="field">
+              <label for="name">企業名 <span class="required-mark">*</span></label>
+              <input id="name" name="name" type="text" placeholder="例: 株式会社サンプルテック" required />
+            </div>
+            <div class="field">
+              <label for="kind">区分 <span class="required-mark">*</span></label>
+              <select id="kind" name="kind" required>
+                <option value="" disabled selected>選択してください</option>
+                <option value="introducer">人材紹介（紹介元）</option>
+                <option value="distributor">案件配信（配信元）</option>
+                <option value="both">両方</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="domain">メールドメイン</label>
+              <input id="domain" name="domain" type="text" placeholder="例: sampletech.example" />
+              <p class="muted field-hint">取込メールの送信元ドメインと照合して自動紐付けします。</p>
+            </div>
+            <div class="field">
+              <label for="default_email">既定の返信先メール</label>
+              <input id="default_email" name="default_email" type="email" placeholder="例: desk@sampletech.example" />
+            </div>
+            <div class="field">
+              <label for="notes">備考</label>
+              <textarea id="notes" name="notes" placeholder="取引条件や注意事項など"></textarea>
+            </div>
+          </div>
+        </article>
+
+        <article class="detail-card">
+          <h2>主担当者（任意）</h2>
+          <p class="muted" style="margin:0 0 12px;">登録と同時に主担当者を追加できます。後から担当者一覧でも登録可能です。</p>
+          <div class="stack">
+            <div class="field">
+              <label for="contact_name">氏名</label>
+              <input id="contact_name" name="contact_name" type="text" placeholder="例: 山田 花子" />
+            </div>
+            <div class="field">
+              <label for="contact_email">メールアドレス</label>
+              <input id="contact_email" name="contact_email" type="email" placeholder="例: yamada@sampletech.example" />
+            </div>
+            <div class="field">
+              <label for="contact_phone">電話番号</label>
+              <input id="contact_phone" name="contact_phone" type="tel" placeholder="例: 03-1234-5678" />
+            </div>
+          </div>
+        </article>
+      </form>
+
+      <section class="panel" style="margin-top:16px;">
+        <div class="panel-head">
+          <h2>登録後の流れ</h2>
+        </div>
+        <ol class="steps-list">
+          <li>企業情報を登録 → 企業詳細画面へ遷移</li>
+          <li>必要に応じて副担当者を <a href="contact-new.html">担当者を追加</a> から登録</li>
+        </ol>
+        <div class="flow-links" style="margin-top:12px;">
+          <button class="btn btn-primary" type="submit" form="company-form">登録する（イメージ）</button>
+          <a class="btn btn-ghost" href="companies.html">企業一覧へ戻る</a>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DB ER図 — MatchingService 設計書</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">MS</span>
+        <div>
+          <strong>MatchingService</strong>
+          <small>設計書</small>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="nav-item" href="../システム要件/index.html">技術選定</a>
+        <a class="nav-item" href="../基本設計書/画面設計書/index.html">画面設計書</a>
+        <a class="nav-item" href="../基本設計書/バッチ設計書/index.html">バッチ設計書</a>
+        <a class="nav-item" href="../基本設計書/共通機能/index.html">共通機能</a>
+        <a class="nav-item is-active" href="index.html">DB ER図</a>
+        <a class="nav-item" href="../エラーコード一覧/index.html">エラーコード一覧</a>
+        <a class="nav-item" href="../システムイメージ/index.html">システムイメージ</a>
+        <a class="nav-item" href="../システムイメージ/settings.html">設定（画面マップ）</a>
+      </nav>
+    </aside>
+
+    <main class="main main--er">
+      <header class="topbar">
+        <div>
+          <h1>DB ER図</h1>
+          <p class="muted">PostgreSQL 想定スキーマ（設計段階）</p>
+        </div>
+        <div class="topbar-actions">
+          <a class="btn btn-secondary" href="#table-index">テーブル一覧へ</a>
+          <a class="btn btn-secondary" href="../システムイメージ/index.html">画面イメージへ</a>
+        </div>
+      </header>
+
+      <p class="er-intro">
+        図中の<strong>テーブル名</strong>をクリックすると、ページ下部の項目定義へジャンプします。
+        人材紹介メール・案件配信メールの取込、AI 要約、ルールスコア採点、LLM 補助判定、担当者への提案メール送信までをカバーする想定です。
+      </p>
+
+      <div class="er-legend">
+        <span><i class="pk"></i> PK（主キー）</span>
+        <span><i class="fk"></i> FK（外部キー）</span>
+        <span><i class="uq"></i> UQ（一意制約）</span>
+      </div>
+
+      <div class="er-line-legend">
+        <span><i class="line-master"></i> マスタ（company 系）</span>
+        <span><i class="line-ingest"></i> 取込（email 系）</span>
+        <span><i class="line-match"></i> マッチング</span>
+        <span><i class="line-send"></i> 送信・応募</span>
+      </div>
+
+      <p class="er-hint">線の色でリレーション種別を示しています。<strong>紫線</strong>は番号（⑬〜⑰）付き。詳細は下の<strong>リレーション対応表</strong>を参照してください。</p>
+
+      <section class="er-diagram-wrap" aria-label="ER図">
+        <svg class="er-diagram" viewBox="0 0 1180 840" xmlns="http://www.w3.org/2000/svg" role="img">
+          <title>MatchingService DB ER図</title>
+
+          <defs>
+            <marker id="arr-master" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" fill="#0f5c4c" />
+            </marker>
+            <marker id="arr-ingest" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" fill="#2563eb" />
+            </marker>
+            <marker id="arr-match" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" fill="#c2410c" />
+            </marker>
+            <marker id="arr-send" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" fill="#7c3aed" />
+            </marker>
+          </defs>
+
+          <!-- ゾーン背景 -->
+          <rect class="er-zone" x="16" y="48" width="236" height="248" rx="10" />
+          <rect class="er-zone" x="296" y="48" width="200" height="96" rx="10" />
+          <rect class="er-zone er-zone-entity" x="256" y="328" width="468" height="132" rx="10" />
+          <rect class="er-zone" x="16" y="468" width="744" height="220" rx="10" />
+          <rect class="er-zone er-zone-send" x="792" y="328" width="272" height="300" rx="10" />
+          <rect class="er-zone er-zone-standalone" x="376" y="728" width="200" height="72" rx="10" />
+
+          <!-- リレーション線 -->
+          <g class="er-relations">
+            <path class="er-line er-line-master" marker-end="url(#arr-master)" d="M 135 120 L 135 148" />
+            <path class="er-line er-line-master" marker-end="url(#arr-master)" d="M 40 98 L 10 98 L 10 224 L 40 224" />
+            <path class="er-line er-line-master" marker-end="url(#arr-master)" d="M 230 92 L 316 92" />
+            <path class="er-line er-line-master" marker-end="url(#arr-master)" d="M 230 98 L 254 98 L 254 312 L 371 312 L 371 378" />
+            <path class="er-line er-line-master" marker-end="url(#arr-master)" d="M 230 98 L 274 98 L 274 324 L 615 324 L 615 378" />
+
+            <path class="er-line er-line-ingest" marker-end="url(#arr-ingest)" d="M 396 128 L 384 128 L 384 336 L 371 336 L 371 378" />
+            <path class="er-line er-line-ingest" marker-end="url(#arr-ingest)" d="M 396 128 L 408 128 L 408 350 L 615 350 L 615 378" />
+
+            <path class="er-line er-line-match" marker-end="url(#arr-match)" d="M 371 436 L 371 564 L 388 564 L 388 588" />
+            <path class="er-line er-line-match" marker-end="url(#arr-match)" d="M 615 436 L 615 564 L 558 564 L 558 588" />
+            <path class="er-line er-line-match" marker-end="url(#arr-match)" d="M 485 562 L 485 574 L 448 574 L 448 588" />
+            <path class="er-line er-line-match" marker-end="url(#arr-match)" d="M 276 407 L 135 407 L 135 588" />
+            <path class="er-line er-line-match" marker-end="url(#arr-match)" d="M 615 436 L 615 458 L 230 458 L 230 588" />
+
+            <path class="er-line er-line-send" marker-end="url(#arr-send)" d="M 230 172 L 244 172 L 244 618 L 804 618" />
+            <path class="er-line er-line-send" marker-end="url(#arr-send)" d="M 710 407 L 778 407 L 778 632 L 804 632" />
+            <path class="er-line er-line-send" marker-end="url(#arr-send)" d="M 918 588 L 918 542" />
+            <path class="er-line er-line-send" marker-end="url(#arr-send)" d="M 942 488 L 942 436" />
+            <path class="er-line er-line-send" marker-end="url(#arr-send)" d="M 371 436 L 371 448 L 756 448 L 756 406 L 804 406" />
+          </g>
+
+          <!-- テーブル（コンパクト表示） -->
+          <g id="er-companies">
+            <rect class="er-box" x="40" y="76" width="190" height="44" rx="8" />
+            <rect class="er-box-head" x="40" y="76" width="190" height="22" rx="8" />
+            <rect class="er-box-head" x="40" y="90" width="190" height="8" />
+            <a href="#tbl-companies"><text class="er-box-title" x="52" y="92">companies</text></a>
+            <text class="er-box-col pk" x="52" y="110">id</text>
+          </g>
+
+          <g id="er-contacts">
+            <rect class="er-box" x="40" y="148" width="190" height="52" rx="8" />
+            <rect class="er-box-head" x="40" y="148" width="190" height="22" rx="8" />
+            <rect class="er-box-head" x="40" y="162" width="190" height="8" />
+            <a href="#tbl-contacts"><text class="er-box-title" x="52" y="164">contacts</text></a>
+            <text class="er-box-col fk" x="52" y="182">company_id</text>
+          </g>
+
+          <g id="er-emails">
+            <rect class="er-box" x="316" y="76" width="160" height="52" rx="8" />
+            <rect class="er-box-head" x="316" y="76" width="160" height="22" rx="8" />
+            <rect class="er-box-head" x="316" y="90" width="160" height="8" />
+            <a href="#tbl-emails"><text class="er-box-title" x="328" y="92">emails</text></a>
+            <text class="er-box-col fk" x="328" y="110">source_company_id</text>
+          </g>
+
+          <g id="er-talents">
+            <rect class="er-box" x="276" y="378" width="190" height="58" rx="8" />
+            <rect class="er-box-head" x="276" y="378" width="190" height="24" rx="8" />
+            <rect class="er-box-head" x="276" y="394" width="190" height="8" />
+            <a href="#tbl-talents"><text class="er-box-title" x="288" y="394">talents</text></a>
+            <text class="er-box-col fk" x="288" y="412">email_id</text>
+            <text class="er-box-col fk" x="288" y="426">introducer_company_id</text>
+          </g>
+
+          <g id="er-projects">
+            <rect class="er-box" x="520" y="378" width="190" height="58" rx="8" />
+            <rect class="er-box-head" x="520" y="378" width="190" height="24" rx="8" />
+            <rect class="er-box-head" x="520" y="394" width="190" height="8" />
+            <a href="#tbl-projects"><text class="er-box-title" x="532" y="394">projects</text></a>
+            <text class="er-box-col fk" x="532" y="412">email_id</text>
+            <text class="er-box-col fk" x="532" y="426">distributor_company_id</text>
+          </g>
+
+          <g id="er-match_runs">
+            <rect class="er-box" x="396" y="508" width="178" height="54" rx="8" />
+            <rect class="er-box-head" x="396" y="508" width="178" height="24" rx="8" />
+            <rect class="er-box-head" x="396" y="524" width="178" height="8" />
+            <a href="#tbl-match_runs"><text class="er-box-title" x="408" y="524">match_runs</text></a>
+            <text class="er-box-col" x="408" y="544">id, trigger, min_score …</text>
+          </g>
+
+          <g id="er-matches">
+            <rect class="er-box" x="296" y="588" width="300" height="68" rx="8" />
+            <rect class="er-box-head" x="296" y="588" width="300" height="24" rx="8" />
+            <rect class="er-box-head" x="296" y="604" width="300" height="8" />
+            <a href="#tbl-matches"><text class="er-box-title" x="308" y="604">matches</text></a>
+            <text class="er-box-col fk" x="308" y="622">match_run_id, talent_id, project_id</text>
+            <text class="er-box-col" x="308" y="638">score, is_candidate …</text>
+          </g>
+
+          <g id="er-applications">
+            <rect class="er-box" x="40" y="588" width="190" height="54" rx="8" />
+            <rect class="er-box-head" x="40" y="588" width="190" height="24" rx="8" />
+            <rect class="er-box-head" x="40" y="604" width="190" height="8" />
+            <a href="#tbl-applications"><text class="er-box-title" x="52" y="604">applications</text></a>
+            <text class="er-box-col fk" x="52" y="624">talent_id, project_id</text>
+          </g>
+
+          <g id="er-sent_email_talents">
+            <rect class="er-box" x="804" y="378" width="228" height="58" rx="8" />
+            <rect class="er-box-head" x="804" y="378" width="228" height="24" rx="8" />
+            <rect class="er-box-head" x="804" y="394" width="228" height="8" />
+            <a href="#tbl-sent_email_talents"><text class="er-box-title" x="816" y="394">sent_email_talents</text></a>
+            <text class="er-box-col fk" x="816" y="412">sent_email_id</text>
+            <text class="er-box-col fk" x="816" y="426">talent_id</text>
+          </g>
+
+          <g id="er-sent_emails">
+            <rect class="er-box" x="804" y="488" width="228" height="54" rx="8" />
+            <rect class="er-box-head" x="804" y="488" width="228" height="24" rx="8" />
+            <rect class="er-box-head" x="804" y="504" width="228" height="8" />
+            <a href="#tbl-sent_emails"><text class="er-box-title" x="816" y="504">sent_emails</text></a>
+            <text class="er-box-col fk" x="816" y="524">proposal_id</text>
+          </g>
+
+          <g id="er-proposals">
+            <rect class="er-box" x="804" y="588" width="228" height="54" rx="8" />
+            <rect class="er-box-head" x="804" y="588" width="228" height="24" rx="8" />
+            <rect class="er-box-head" x="804" y="604" width="228" height="8" />
+            <a href="#tbl-proposals"><text class="er-box-title" x="816" y="604">proposals</text></a>
+            <text class="er-box-col fk" x="816" y="624">project_id, contact_id</text>
+          </g>
+
+          <g id="er-system_settings">
+            <rect class="er-box er-box-standalone" x="396" y="756" width="160" height="36" rx="8" />
+            <rect class="er-box-head" x="396" y="756" width="160" height="22" rx="8" />
+            <rect class="er-box-head" x="396" y="770" width="160" height="8" />
+            <a href="#tbl-system_settings"><text class="er-box-title" x="408" y="772">system_settings</text></a>
+            <text class="er-box-col pk" x="408" y="786">key</text>
+          </g>
+
+          <!-- 紫線ラベル（最前面） -->
+          <g class="er-send-labels">
+            <text class="er-line-label er-line-label-send" x="300" y="168">⑫ contacts → proposals</text>
+            <text class="er-line-label er-line-label-send" x="650" y="400">⑬ projects → proposals</text>
+            <text class="er-line-label er-line-label-send" x="916" y="568">⑭ proposals → sent_emails</text>
+            <text class="er-line-label er-line-label-send" x="948" y="468">⑮ sent_emails → sent_email_talents</text>
+            <text class="er-line-label er-line-label-send" x="580" y="442">⑯ talents → sent_email_talents</text>
+            <text class="er-zone-hint" x="804" y="364">⑭⑮ 下から上へ送信</text>
+          </g>
+
+          <!-- ゾーンラベル（最前面） -->
+          <g class="er-zone-labels">
+            <text class="er-zone-label" x="28" y="64">① マスタ</text>
+            <text class="er-zone-label" x="308" y="64">② 取込</text>
+            <text class="er-zone-label" x="268" y="346">③ エンティティ</text>
+            <text class="er-zone-label" x="28" y="486">④ マッチング / 応募</text>
+            <text class="er-zone-label" x="804" y="346">⑤ 送信</text>
+            <text class="er-zone-label" x="388" y="744">設定（独立）</text>
+          </g>
+        </svg>
+      </section>
+
+      <section class="panel er-relation-map">
+        <div class="panel-head"><h2>リレーション対応表</h2></div>
+        <div class="table-wrap">
+          <table class="table er-map-table">
+            <thead>
+              <tr><th>番号</th><th>種別</th><th>From</th><th>FK</th><th>To</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>①</td><td class="map-master">マスタ</td><td>companies</td><td>company_id</td><td>contacts</td></tr>
+              <tr><td>②</td><td class="map-master">マスタ</td><td>companies</td><td>source_company_id</td><td>emails</td></tr>
+              <tr><td>③</td><td class="map-master">マスタ</td><td>companies</td><td>introducer_company_id</td><td>talents</td></tr>
+              <tr><td>④</td><td class="map-master">マスタ</td><td>companies</td><td>distributor_company_id</td><td>projects</td></tr>
+              <tr><td>⑤</td><td class="map-ingest">取込</td><td>emails</td><td>email_id</td><td>talents</td></tr>
+              <tr><td>⑥</td><td class="map-ingest">取込</td><td>emails</td><td>email_id</td><td>projects</td></tr>
+              <tr><td>⑦</td><td class="map-match">マッチ</td><td>talents</td><td>talent_id</td><td>matches</td></tr>
+              <tr><td>⑧</td><td class="map-match">マッチ</td><td>projects</td><td>project_id</td><td>matches</td></tr>
+              <tr><td>⑨</td><td class="map-match">マッチ</td><td>match_runs</td><td>match_run_id</td><td>matches</td></tr>
+              <tr><td>⑩</td><td class="map-match">マッチ</td><td>talents</td><td>talent_id</td><td>applications</td></tr>
+              <tr><td>⑪</td><td class="map-match">マッチ</td><td>projects</td><td>project_id</td><td>applications</td></tr>
+              <tr><td>⑫</td><td class="map-send">送信</td><td>contacts</td><td>contact_id</td><td>proposals</td></tr>
+              <tr><td>⑬</td><td class="map-send">送信</td><td>projects</td><td>project_id</td><td>proposals</td></tr>
+              <tr><td>⑭</td><td class="map-send">送信</td><td>proposals</td><td>proposal_id</td><td>sent_emails</td></tr>
+              <tr><td>⑮</td><td class="map-send">送信</td><td>sent_emails</td><td>sent_email_id</td><td>sent_email_talents</td></tr>
+              <tr><td>⑯</td><td class="map-send">送信</td><td>talents</td><td>talent_id</td><td>sent_email_talents</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel toc-panel" id="table-index">
+        <div class="panel-head">
+          <h2>テーブル一覧</h2>
+        </div>
+        <div class="toc-grid">
+          <a href="#tbl-companies">companies</a>
+          <a href="#tbl-contacts">contacts</a>
+          <a href="#tbl-emails">emails</a>
+          <a href="#tbl-talents">talents</a>
+          <a href="#tbl-projects">projects</a>
+          <a href="#tbl-match_runs">match_runs</a>
+          <a href="#tbl-matches">matches</a>
+          <a href="#tbl-applications">applications</a>
+          <a href="#tbl-proposals">proposals</a>
+          <a href="#tbl-sent_emails">sent_emails</a>
+          <a href="#tbl-sent_email_talents">sent_email_talents</a>
+          <a href="#tbl-system_settings">system_settings</a>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>ドメイン別の流れ（概要）</h2>
+        </div>
+        <ul class="relation-list">
+          <li><strong>マスタ</strong>：<code>companies</code> を中心に <code>contacts</code> / 取込元紐付け。提案メールの件名・本文は DB テンプレではなくコード内で固定生成（BAT-007 / BAT-009）</li>
+          <li><strong>取込</strong>：Gmail メール振り分け（BAT-001）→ ラベル別取込・AI 要約（BAT-002）→ 過去データ削除（BAT-006）→ <code>talents</code> / <code>projects</code> 登録後にルール採点（BAT-003）</li>
+          <li><strong>マッチング</strong>：<code>talents</code> × <code>projects</code> → ルールスコア採点 → <code>matches</code>（<code>match_runs</code> 単位）。LLM 判定は上位候補のみ補助情報として追記</li>
+          <li><strong>応募</strong>：<code>applications</code> で人材×案件の応募状態を管理</li>
+          <li><strong>送信</strong>：実装は <code>outreach_messages</code> / <code>outreach_message_talents</code> / <code>outreach_replies</code>（Gmail スレッドへの返信提案）。下図の <code>proposals</code> / <code>sent_emails</code> は旧案表記</li>
+        </ul>
+      </section>
+
+      <!-- テーブル定義 -->
+      <section class="table-def" id="tbl-companies">
+        <h2><a href="#tbl-companies">companies</a></h2>
+        <p class="desc">紹介元・配信元企業のマスタ。人材詳細の「紹介元会社」、案件の「配信元会社」に対応。</p>
+        <div class="table-wrap">
+          <table class="table col-table">
+            <thead>
+              <tr><th>カラム</th><th>型</th><th>制約</th><th>説明</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>id</td><td>UUID</td><td><span class="tag tag-pk">PK</span></td><td>企業 ID</td></tr>
+              <tr><td>name</td><td>VARCHAR(255)</td><td>NOT NULL</td><td>企業名</td></tr>
+              <tr><td>kind</td><td>VARCHAR(32)</td><td>NOT NULL</td><td><code>introducer</code>（紹介元）/ <code>distributor</code>（配信元）/ <code>both</code></td></tr>
+              <tr><td>domain</td><td>VARCHAR(255)</td><td></td><td>メールドメイン（自動紐付け用）</td></tr>
+              <tr><td>default_email</td><td>VARCHAR(255)</td><td></td><td>既定の返信先メール</td></tr>
+              <tr><td>notes</td><td>TEXT</td><td></td><td>備考</td></tr>
+              <tr><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>作成日時</td></tr>
+              <tr><td>updated_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>更新日時</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <a class="back-top" href="#">↑ ER図へ戻る</a>
+      </section>
+
+      <section class="table-def" id="tbl-contacts">
+        <h2><a href="#tbl-contacts">contacts</a></h2>
+        <p class="desc">企業ごとの担当者。提案メールの宛先・CC に使用。</p>
+        <div class="table-wrap">
+          <table class="table col-table">
+            <thead>
+              <tr><th>カラム</th><th>型</th><th>制約</th><th>説明</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>id</td><td>UUID</td><td><span class="tag tag-pk">PK</span></td><td>担当者 ID</td></tr>
+              <tr><td>company_id</td><td>UUID</td><td><span class="tag tag-fk">FK</span> companies</td><td>所属企業</td></tr>
+              <tr><td>name</td><td>VARCHAR(128)</td><td>NOT NULL</td><td>氏名</td></tr>
+              <tr><td>email</td><td>VARCHAR(255)</td><td>NOT NULL</td><td>メールアドレス</td></tr>
+              <tr><td>role</td><td>VARCHAR(32)</td><td>NOT NULL</td><td><code>primary</code>（主担当）/ <code>secondary</code>（副担当）</td></tr>
+              <tr><td>phone</td><td>VARCHAR(32)</td><td></td><td>電話番号</td></tr>
+              <tr><td>is_active</td><td>BOOLEAN</td><td>DEFAULT true</td><td>有効フラグ</td></tr>
+              <tr><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>作成日時</td></tr>
+              <tr><td>updated_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>更新日時</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <a class="back-top" href="#">↑ ER図へ戻る</a>
+      </section>
+
+      <section class="table-def" id="tbl-emails">
+        <h2><a href="#tbl-emails">emails</a></h2>
+        <p class="desc">Gmail から取り込んだ生メール。メール取込画面の一覧に対応。</p>
+        <div class="table-wrap">
+          <table class="table col-table">
+            <thead>
+              <tr><th>カラム</th><th>型</th><th>制約</th><th>説明</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>id</td><td>UUID</td><td><span class="tag tag-pk">PK</span></td><td>メール ID</td></tr>
+              <tr><td>gmail_message_id</td><td>VARCHAR(128)</td><td><span class="tag tag-uq">UQ</span></td><td>Gmail メッセージ ID（重複取込防止）</td></tr>
+              <tr><td>thread_id</td><td>VARCHAR(128)</td><td></td><td>Gmail スレッド ID</td></tr>
+              <tr><td>label</td><td>VARCHAR(64)</td><td>NOT NULL</td><td>取得ラベル（SES人材紹介 / SES案件配信 等）</td></tr>
+              <tr><td>from_address</td><td>VARCHAR(255)</td><td>NOT NULL</td><td>送信元アドレス</td></tr>
+              <tr><td>subject</td><td>TEXT</td><td>NOT NULL</td><td>件名</td></tr>
+              <tr><td>received_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>受信日時</td></tr>
+              <tr><td>body_text</td><td>TEXT</td><td></td><td>本文（プレーンテキスト）</td></tr>
+              <tr><td>body_html</td><td>TEXT</td><td></td><td>本文（HTML）</td></tr>
+              <tr><td>email_type</td><td>VARCHAR(16)</td><td>NOT NULL</td><td><code>talent</code> / <code>project</code> / <code>unknown</code></td></tr>
+              <tr><td>status</td><td>VARCHAR(16)</td><td>NOT NULL</td><td><code>pending</code> / <code>summarized</code> / <code>failed</code> / <code>skipped</code></td></tr>
+              <tr><td>source_company_id</td><td>UUID</td><td><span class="tag tag-fk">FK</span> companies</td><td>送信元ドメインから推定した企業</td></tr>
+              <tr><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>作成日時</td></tr>
+              <tr><td>updated_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>更新日時</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <a class="back-top" href="#">↑ ER図へ戻る</a>
+      </section>
+
+      <section class="table-def" id="tbl-talents">
+        <h2><a href="#tbl-talents">talents</a></h2>
+        <p class="desc">AI で要約した人材情報。人材一覧・人材詳細に対応。</p>
+        <div class="table-wrap">
+          <table class="table col-table">
+            <thead>
+              <tr><th>カラム</th><th>型</th><th>制約</th><th>説明</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>id</td><td>UUID</td><td><span class="tag tag-pk">PK</span></td><td>人材 ID（画面表示用コードは別途）</td></tr>
+              <tr><td>email_id</td><td>UUID</td><td><span class="tag tag-fk">FK</span> <span class="tag tag-uq">UQ</span> emails</td><td>取込元メール（1メール1人材）</td></tr>
+              <tr><td>introducer_company_id</td><td>UUID</td><td><span class="tag tag-fk">FK</span> companies</td><td>紹介元会社</td></tr>
+              <tr><td>display_name</td><td>VARCHAR(128)</td><td>NOT NULL</td><td>氏名（表示名）</td></tr>
+              <tr><td>affiliation</td><td>VARCHAR(255)</td><td></td><td>所属（フリーランス等）</td></tr>
+              <tr><td>age</td><td>SMALLINT</td><td></td><td>年齢</td></tr>
+              <tr><td>experience_years</td><td>SMALLINT</td><td></td><td>経験年数</td></tr>
+              <tr><td>desired_rate</td><td>INTEGER</td><td></td><td>希望単価（万円/月）</td></tr>
+              <tr><td>available_from</td><td>VARCHAR(64)</td><td></td><td>稼働開始（即日 等）</td></tr>
+              <tr><td>work_style</td><td>VARCHAR(255)</td><td></td><td>勤務形態</td></tr>
+              <tr><td>nearest_station</td><td>VARCHAR(64)</td><td></td><td>最寄駅・エリア</td></tr>
+              <tr><td>skills</td><td>JSONB</td><td>NOT NULL DEFAULT '[]'</td><td>スキルタグ配列</td></tr>
+              <tr><td>summary</td><td>TEXT</td><td></td><td>要約全文</td></tr>
+              <tr><td>status</td><td>VARCHAR(16)</td><td>NOT NULL</td><td><code>active</code> / <code>inactive</code></td></tr>
+              <tr><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>作成日時</td></tr>
+              <tr><td>updated_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>更新日時</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <a class="back-top" href="#">↑ ER図へ戻る</a>
+      </section>
+
+      <section class="table-def" id="tbl-projects">
+        <h2><a href="#tbl-projects">projects</a></h2>
+        <p class="desc">AI で要約した案件情報。案件一覧・案件詳細・マッチ結果に対応。</p>
+        <div class="table-wrap">
+          <table class="table col-table">
+            <thead>
+              <tr><th>カラム</th><th>型</th><th>制約</th><th>説明</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>id</td><td>UUID</td><td><span class="tag tag-pk">PK</span></td><td>案件 ID</td></tr>
+              <tr><td>email_id</td><td>UUID</td><td><span class="tag tag-fk">FK</span> <span class="tag tag-uq">UQ</span> emails</td><td>取込元メール（1メール1案件）</td></tr>
+              <tr><td>distributor_company_id</td><td>UUID</td><td><span class="tag tag-fk">FK</span> companies</td><td>配信元会社</td></tr>
+              <tr><td>project_code</td><td>VARCHAR(32)</td><td></td><td>画面表示用コード（例: P-2208）</td></tr>
+              <tr><td>title</td><td>VARCHAR(255)</td><td>NOT NULL</td><td>案件名</td></tr>
+              <tr><td>required_skills</td><td>JSONB</td><td>NOT NULL DEFAULT '[]'</td><td>必須スキル配列</td></tr>
+              <tr><td>rate_min</td><td>INTEGER</td><td></td><td>単価下限（万円/月）</td></tr>
+              <tr><td>rate_max</td><td>INTEGER</td><td></td><td>単価上限（万円/月）</td></tr>
+              <tr><td>location</td><td>VARCHAR(128)</td><td></td><td>勤務地</td></tr>
+              <tr><td>work_style</td><td>VARCHAR(255)</td><td></td><td>勤務形態</td></tr>
+              <tr><td>start_date</td><td>VARCHAR(64)</td><td></td><td>開始時期</td></tr>
+              <tr><td>summary</td><td>TEXT</td><td></td><td>要約全文</td></tr>
+              <tr><td>status</td><td>VARCHAR(16)</td><td>NOT NULL</td><td><code>open</code> / <code>closed</code></td></tr>
+              <tr><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>作成日時</td></tr>
+              <tr><td>updated_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>更新日時</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <a class="back-top" href="#">↑ ER図へ戻る</a>
+      </section>
+
+      <section class="table-def" id="tbl-match_runs">
+        <h2><a href="#tbl-match_runs">match_runs</a></h2>
+        <p class="desc">マッチング実行の単位。バッチ自動実行・手動実行の履歴と、その時点の閾値を保持。</p>
+        <div class="table-wrap">
+          <table class="table col-table">
+            <thead>
+              <tr><th>カラム</th><th>型</th><th>制約</th><th>説明</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>id</td><td>UUID</td><td><span class="tag tag-pk">PK</span></td><td>実行 ID</td></tr>
+              <tr><td>trigger</td><td>VARCHAR(16)</td><td>NOT NULL</td><td><code>batch_auto</code> / <code>manual</code></td></tr>
+              <tr><td>ai_judgement_top_n</td><td>SMALLINT</td><td></td><td>実行時の AI 判定対象上位人数</td></tr>
+              <tr><td>ai_assist_enabled</td><td>BOOLEAN</td><td>DEFAULT false</td><td>LLM 補助判定を自動実行したか</td></tr>
+              <tr><td>status</td><td>VARCHAR(16)</td><td>NOT NULL</td><td><code>running</code> / <code>completed</code> / <code>failed</code></td></tr>
+              <tr><td>stats</td><td>JSONB</td><td></td><td>件数サマリ（対象人材数・案件数・ヒット数など）</td></tr>
+              <tr><td>started_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>開始日時</td></tr>
+              <tr><td>finished_at</td><td>TIMESTAMPTZ</td><td></td><td>終了日時</td></tr>
+              <tr><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>作成日時</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <a class="back-top" href="#">↑ ER図へ戻る</a>
+      </section>
+
+      <section class="table-def" id="tbl-matches">
+        <h2><a href="#tbl-matches">matches</a></h2>
+        <p class="desc">人材×案件のマッチング結果。案件一覧の最高スコア・スコア帯はルールスコアを表示し、LLM 判定は理由・懸念点の補助情報として保持する。</p>
+        <div class="table-wrap">
+          <table class="table col-table">
+            <thead>
+              <tr><th>カラム</th><th>型</th><th>制約</th><th>説明</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>id</td><td>UUID</td><td><span class="tag tag-pk">PK</span></td><td>マッチ ID</td></tr>
+              <tr><td>match_run_id</td><td>UUID</td><td><span class="tag tag-fk">FK</span> match_runs</td><td>どの実行で算出されたか</td></tr>
+              <tr><td>talent_id</td><td>UUID</td><td><span class="tag tag-fk">FK</span> talents</td><td>人材</td></tr>
+              <tr><td>project_id</td><td>UUID</td><td><span class="tag tag-fk">FK</span> projects</td><td>案件</td></tr>
+              <tr><td>score</td><td>SMALLINT</td><td>NOT NULL</td><td>ルールスコア（0–100）。案件一覧の最高スコア・スコア帯の元データ</td></tr>
+              <tr><td>score_band</td><td>VARCHAR(8)</td><td></td><td>ルールスコア帯（10点刻み、チャート表示用）</td></tr>
+              <tr><td>ai_score</td><td>SMALLINT</td><td></td><td>LLM 補助判定スコア（任意、0–100）</td></tr>
+              <tr><td>reason</td><td>TEXT</td><td></td><td>LLM による補助判定理由。未判定時は NULL</td></tr>
+              <tr><td>ai_judged_at</td><td>TIMESTAMPTZ</td><td></td><td>LLM 補助判定日時。キャッシュ再利用判断に使用</td></tr>
+              <tr><td>is_candidate</td><td>BOOLEAN</td><td>NOT NULL</td><td>応募候補として扱うか。AI 判定済み上位候補に絞る設定時はその結果を反映</td></tr>
+              <tr><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>作成日時</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="muted" style="margin-top:8px;">推奨インデックス: <code>(project_id, score DESC)</code>, <code>(talent_id, project_id)</code></p>
+        <a class="back-top" href="#">↑ ER図へ戻る</a>
+      </section>
+
+      <section class="table-def" id="tbl-applications">
+        <h2><a href="#tbl-applications">applications</a></h2>
+        <p class="desc">人材の応募状況。人材詳細の「応募中の案件」テーブルに対応。</p>
+        <div class="table-wrap">
+          <table class="table col-table">
+            <thead>
+              <tr><th>カラム</th><th>型</th><th>制約</th><th>説明</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>id</td><td>UUID</td><td><span class="tag tag-pk">PK</span></td><td>応募 ID</td></tr>
+              <tr><td>talent_id</td><td>UUID</td><td><span class="tag tag-fk">FK</span> talents</td><td>応募する人材</td></tr>
+              <tr><td>project_id</td><td>UUID</td><td><span class="tag tag-fk">FK</span> projects</td><td>応募先案件</td></tr>
+              <tr><td>match_id</td><td>UUID</td><td><span class="tag tag-fk">FK</span> matches</td><td>根拠となったマッチ（任意）</td></tr>
+              <tr><td>status</td><td>VARCHAR(16)</td><td>NOT NULL</td><td><code>draft</code> / <code>sent</code> / <code>withdrawn</code> 等</td></tr>
+              <tr><td>applied_at</td><td>TIMESTAMPTZ</td><td></td><td>応募日時</td></tr>
+              <tr><td>sent_email_id</td><td>UUID</td><td><span class="tag tag-fk">FK</span> sent_emails</td><td>送信したメール（任意）</td></tr>
+              <tr><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>作成日時</td></tr>
+              <tr><td>updated_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>更新日時</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <a class="back-top" href="#">↑ ER図へ戻る</a>
+      </section>
+
+      <section class="table-def" id="tbl-proposals">
+        <h2><a href="#tbl-proposals">proposals</a></h2>
+        <p class="desc">旧案の提案単位テーブル。現行実装の送信履歴は <code>outreach_messages</code>（kind=<code>talent_proposal</code> / <code>project_proposal</code>）を参照。</p>
+        <div class="table-wrap">
+          <table class="table col-table">
+            <thead>
+              <tr><th>カラム</th><th>型</th><th>制約</th><th>説明</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>id</td><td>UUID</td><td><span class="tag tag-pk">PK</span></td><td>提案 ID</td></tr>
+              <tr><td>project_id</td><td>UUID</td><td><span class="tag tag-fk">FK</span> projects</td><td>対象案件</td></tr>
+              <tr><td>contact_id</td><td>UUID</td><td><span class="tag tag-fk">FK</span> contacts</td><td>宛先担当者</td></tr>
+              <tr><td>kind</td><td>VARCHAR(16)</td><td>NOT NULL</td><td><code>proposal</code>（要員提案）/ <code>application</code>（応募）</td></tr>
+              <tr><td>status</td><td>VARCHAR(16)</td><td>NOT NULL</td><td><code>draft</code> / <code>sent</code> / <code>failed</code></td></tr>
+              <tr><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>作成日時</td></tr>
+              <tr><td>updated_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>更新日時</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <a class="back-top" href="#">↑ ER図へ戻る</a>
+      </section>
+
+      <section class="table-def" id="tbl-sent_emails">
+        <h2><a href="#tbl-sent_emails">sent_emails</a></h2>
+        <p class="desc">実際に送信したメールの記録。1通に複数要員を含む提案に対応。</p>
+        <div class="table-wrap">
+          <table class="table col-table">
+            <thead>
+              <tr><th>カラム</th><th>型</th><th>制約</th><th>説明</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>id</td><td>UUID</td><td><span class="tag tag-pk">PK</span></td><td>送信メール ID</td></tr>
+              <tr><td>proposal_id</td><td>UUID</td><td><span class="tag tag-fk">FK</span> proposals</td><td>元となった提案</td></tr>
+              <tr><td>gmail_message_id</td><td>VARCHAR(128)</td><td></td><td>送信後の Gmail メッセージ ID</td></tr>
+              <tr><td>to_addresses</td><td>TEXT[]</td><td>NOT NULL</td><td>宛先一覧</td></tr>
+              <tr><td>cc_addresses</td><td>TEXT[]</td><td></td><td>CC 一覧</td></tr>
+              <tr><td>subject</td><td>TEXT</td><td>NOT NULL</td><td>件名（送信時点）</td></tr>
+              <tr><td>body</td><td>TEXT</td><td>NOT NULL</td><td>本文（送信時点）</td></tr>
+              <tr><td>sent_at</td><td>TIMESTAMPTZ</td><td></td><td>送信日時</td></tr>
+              <tr><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>作成日時</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <a class="back-top" href="#">↑ ER図へ戻る</a>
+      </section>
+
+      <section class="table-def" id="tbl-sent_email_talents">
+        <h2><a href="#tbl-sent_email_talents">sent_email_talents</a></h2>
+        <p class="desc">1通の提案メールに含まれる要員の中間テーブル。複数名提案の並び順を保持。</p>
+        <div class="table-wrap">
+          <table class="table col-table">
+            <thead>
+              <tr><th>カラム</th><th>型</th><th>制約</th><th>説明</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>id</td><td>UUID</td><td><span class="tag tag-pk">PK</span></td><td>行 ID</td></tr>
+              <tr><td>sent_email_id</td><td>UUID</td><td><span class="tag tag-fk">FK</span> sent_emails</td><td>送信メール</td></tr>
+              <tr><td>talent_id</td><td>UUID</td><td><span class="tag tag-fk">FK</span> talents</td><td>提案に含める人材</td></tr>
+              <tr><td>match_id</td><td>UUID</td><td><span class="tag tag-fk">FK</span> matches</td><td>参照したマッチ結果（任意）</td></tr>
+              <tr><td>sort_order</td><td>SMALLINT</td><td>NOT NULL</td><td>本文内の表示順</td></tr>
+              <tr><td>created_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>作成日時</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <a class="back-top" href="#">↑ ER図へ戻る</a>
+      </section>
+
+      <section class="table-def" id="tbl-system_settings">
+        <h2><a href="#tbl-system_settings">system_settings</a></h2>
+        <p class="desc">システム設定（キー・バリュー）。設定画面のバッチ・Gmail・AI 各項目に対応。</p>
+        <div class="table-wrap">
+          <table class="table col-table">
+            <thead>
+              <tr><th>カラム</th><th>型</th><th>制約</th><th>説明</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>key</td><td>VARCHAR(64)</td><td><span class="tag tag-pk">PK</span></td><td>設定キー（例: <code>ai_assist_enabled</code>, <code>ai_judgement_top_n</code>）</td></tr>
+              <tr><td>value</td><td>JSONB</td><td>NOT NULL</td><td>設定値（型はキーごとにアプリ側で解釈）</td></tr>
+              <tr><td>description</td><td>TEXT</td><td></td><td>管理画面用の説明</td></tr>
+              <tr><td>updated_at</td><td>TIMESTAMPTZ</td><td>NOT NULL</td><td>更新日時</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="muted" style="margin-top:8px;">想定キー例: <code>ai_assist_enabled</code>, <code>ai_judgement_top_n</code>, <code>ingest_times</code>, <code>ingest_data_retention_days</code>, <code>gmail_sort_source_label</code>, <code>gmail_sort_label_talent</code>, <code>gmail_sort_label_project</code>, <code>gmail_sort_keywords_talent</code>, <code>gmail_sort_keywords_project</code>, <code>gmail_sort_unknown_label</code>, <code>apply_from_address</code>, <code>outreach_template_project_propose</code>, <code>outreach_template_talent_propose</code></p>
+        <a class="back-top" href="#">↑ ER図へ戻る</a>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

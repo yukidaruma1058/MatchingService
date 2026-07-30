@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>マッチング — MatchingService</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">MS</span>
+        <div>
+          <strong>MatchingService</strong>
+          <small>システムイメージ</small>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="nav-item" href="index.html">ダッシュボード</a>
+        <a class="nav-item" href="talents.html">人材一覧</a>
+        <a class="nav-item" href="projects.html">案件一覧</a>
+        <a class="nav-item" href="companies.html">企業一覧</a>
+        <a class="nav-item" href="contacts.html">担当者一覧</a>
+        <a class="nav-item is-active" href="matching.html">マッチング</a>
+        <a class="nav-item" href="emails.html">メール取込</a>
+        <a class="nav-item" href="settings.html">設定</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1>マッチング</h1>
+          <p class="muted">ルールスコア採点後、案件一覧でスコア帯・マッチ結果を確認します</p>
+        </div>
+        <div class="topbar-actions">
+          <a class="btn btn-secondary" href="companies.html">企業一覧</a>
+          <a class="btn btn-primary" href="projects.html">ルール採点実行</a>
+        </div>
+      </header>
+
+      <p class="notice">
+        マッチング結果は案件一覧に統合されています。案件一覧のスコア帯はルールスコアです。LLM 補助判定は設定 ON の場合は採点後に自動実行し、OFF の場合は画面から手動実行します。
+      </p>
+
+      <section class="steps">
+        <div class="step"><strong>1. ルール採点</strong><span>全案件に対して要員ごとのルールスコアを算出</span></div>
+        <div class="step"><strong>2. LLM 補助判定</strong><span>設定に応じて上位候補のみ理由生成</span></div>
+        <div class="step"><strong>3. 詳細から提案</strong><span>要員を選び担当者へテンプレ送信</span></div>
+      </section>
+
+      <form class="filter-bar" action="projects.html" method="get">
+        <div class="field grow">
+          <label for="scope">対象</label>
+          <select id="scope" name="scope">
+            <option selected>直近取込の全案件</option>
+            <option>未提案の案件のみ</option>
+            <option>特定企業の案件</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="ai-top-n">AI判定対象</label>
+          <div class="score-input-row">
+            <span class="score-input-prefix">上位</span>
+            <input id="ai-top-n" name="ai_top_n" type="number" min="1" max="20" value="5" />
+            <span class="score-input-suffix">人</span>
+          </div>
+        </div>
+        <a class="btn btn-primary" href="projects.html">ルール採点実行</a>
+      </form>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>直近の実行</h2>
+          <a href="projects.html">案件一覧で見る</a>
+        </div>
+        <div class="match-grid">
+          <article class="match-card">
+            <div class="score">8</div>
+            <div>
+              <h3>案件 8件 / 要員マッチ 48件</h3>
+              <p>ルールスコア最高帯 90–100 が 12名。案件一覧から詳細へ進めます。</p>
+            </div>
+            <a class="btn btn-ghost" href="projects.html">案件一覧へ</a>
+          </article>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

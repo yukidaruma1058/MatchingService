@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SCR-004 案件一覧 — 基本設計</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">MS</span><div><strong>MatchingService</strong><small>基本設計書</small></div></div>
+      <nav class="nav">
+        <a class="nav-item" href="../index.html">一覧</a>
+        <a class="nav-item is-active" href="projects.html">案件一覧</a>
+        <a class="nav-item" href="project-detail.html">案件詳細</a>
+      </nav>
+    </aside>
+    <main class="main main--bd">
+      <header class="topbar">
+        <div><h1>SCR-004 案件一覧</h1><p class="muted">案件検索・マッチング結果確認・ルール採点の起点</p></div>
+        <div class="topbar-actions"><a class="btn btn-secondary" href="../../../システムイメージ/projects.html">画面イメージ</a></div>
+      </header>
+      <div class="bd-meta"><span>画面ID: SCR-004</span><span>URL: /projects</span><span>マッチ結果ハブ（SCR-010 廃止後の採点入口）</span></div>
+
+      <section class="panel bd-section">
+        <h2>1. 画面概要</h2>
+        <p>案件の検索一覧を表示する。旧 SCR-010 マッチング画面の廃止に伴い、<strong>ルールスコア採点の手動実行</strong>も本画面の操作とする。採点結果の案件別詳細は案件詳細へ遷移して確認する。</p>
+        <p class="muted">スコア帯分布グラフ・応募人数・マッチ要員数・最高スコア等のリッチ表示は設計上の拡張項目（現状の実装は簡易一覧＋検索が中心）。</p>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>2. 画面遷移</h2>
+        <table class="table flow-table">
+          <tbody>
+            <tr><td>遷移元</td><td>ダッシュボード、メール取込、サイドナビ、人材/案件詳細</td></tr>
+            <tr><td>遷移先</td><td>案件詳細、企業詳細</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>3. 表示項目</h2>
+        <h3>操作</h3>
+        <ul>
+          <li><strong>ルール採点を実行</strong> — <code>POST /api/match-runs</code>（BAT-003）。完了メッセージに実行ステータスと組合せ件数を表示</li>
+        </ul>
+        <h3>検索</h3>
+        <p>キーワード、単価上限、スキル（カテゴリ別アコーディオン・複数選択）。スキル選択肢はスキルマスタ（設定画面）を反映。</p>
+        <h3>案件一覧</h3>
+        <table class="table">
+          <thead><tr><th>列</th><th>内容</th></tr></thead>
+          <tbody>
+            <tr><td>ID / 案件名</td><td>project_code, title</td></tr>
+            <tr><td>勤務地</td><td>projects.location（一覧の詳細列）</td></tr>
+            <tr><td>必須スキル・単価</td><td>projects（単価は万円表示に正規化）</td></tr>
+            <tr><td>状態</td><td>open=募集中 / closed=終了（日本語表示）</td></tr>
+            <tr><td>詳細</td><td>案件詳細へ</td></tr>
+          </tbody>
+        </table>
+        <h3>設計上の拡張表示（未実装のまま維持）</h3>
+        <p>直近 match_runs のルールスコア帯分布棒グラフ、応募人数、マッチ要員数、最高スコア、スコア帯ミニバー、タブ「マッチ結果あり」等。</p>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>4. API・参照 DB</h2>
+        <p><strong>API:</strong> <code>GET /api/projects</code>、<code>POST /api/match-runs</code>、<code>GET /api/skills/catalog</code></p>
+        <p><strong>DB:</strong> projects, companies, matches, match_runs, skill_categories, skills</p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

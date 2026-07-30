@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SCR-009 担当者一覧 — 基本設計</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">MS</span><div><strong>MatchingService</strong><small>基本設計書</small></div></div>
+      <nav class="nav">
+        <a class="nav-item" href="../index.html">一覧</a>
+        <a class="nav-item is-active" href="contacts.html">担当者一覧</a>
+        <a class="nav-item" href="contact-new.html">担当者追加</a>
+        <a class="nav-item" href="companies.html">企業一覧</a>
+      </nav>
+    </aside>
+    <main class="main main--bd">
+      <header class="topbar">
+        <div><h1>SCR-009 担当者一覧</h1><p class="muted">企業ごとのメール送信先（主担当・副担当）</p></div>
+        <div class="topbar-actions"><a class="btn btn-secondary" href="../../../システムイメージ/contacts.html">画面イメージ</a></div>
+      </header>
+      <div class="bd-meta"><span>画面ID: SCR-009</span><span>URL: /contacts</span></div>
+
+      <section class="panel bd-section">
+        <h2>1. 画面概要</h2>
+        <p>全企業の担当者を横断検索し、提案メールの宛先・CC を管理する。新規担当者の登録は <a href="contact-new.html">SCR-017 担当者追加</a> へ遷移する。</p>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>2. 画面遷移</h2>
+        <table class="table flow-table">
+          <tbody>
+            <tr><td>遷移元</td><td>サイドナビ、企業詳細</td></tr>
+            <tr><td>遷移先</td><td>企業詳細、<a href="contact-new.html">担当者追加（SCR-017）</a>、<a href="contact-edit.html">担当者編集（SCR-019）</a></td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>3. 表示・検索</h2>
+        <table class="table">
+          <thead><tr><th>列 / 条件</th><th>内容</th></tr></thead>
+          <tbody>
+            <tr><td>氏名・メール</td><td>contacts</td></tr>
+            <tr><td>企業</td><td>companies.name（リンク→企業詳細）</td></tr>
+            <tr><td>役割</td><td>primary / secondary</td></tr>
+            <tr><td>キーワード</td><td>氏名・メール・会社名</td></tr>
+            <tr><td>企業・役割フィルタ</td><td>プルダウン</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>4. 操作</h2>
+        <ul>
+          <li><strong>担当者を追加</strong> → <a href="contact-new.html">SCR-017 担当者追加</a></li>
+          <li><strong>編集</strong>（各行）→ <a href="contact-edit.html">SCR-019 担当者情報編集</a></li>
+          <li>企業詳細 → 企業名列のリンクから遷移</li>
+        </ul>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>5. API・参照 DB</h2>
+        <p><strong>API:</strong> <code>GET /api/contacts</code></p>
+        <p><strong>DB:</strong> contacts, companies</p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

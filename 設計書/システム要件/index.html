@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>技術選定 — MatchingService 設計書</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">MS</span>
+        <div>
+          <strong>MatchingService</strong>
+          <small>設計書</small>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="nav-item is-active" href="index.html">技術選定</a>
+        <a class="nav-item" href="../基本設計書/画面設計書/index.html">画面設計書</a>
+        <a class="nav-item" href="../基本設計書/バッチ設計書/index.html">バッチ設計書</a>
+        <a class="nav-item" href="../基本設計書/共通機能/index.html">共通機能</a>
+        <a class="nav-item" href="../ER図/index.html">DB ER図</a>
+        <a class="nav-item" href="../エラーコード一覧/index.html">エラーコード一覧</a>
+        <a class="nav-item" href="../システムイメージ/index.html">システムイメージ</a>
+      </nav>
+    </aside>
+
+    <main class="main main--req">
+      <header class="topbar">
+        <div>
+          <h1>技術選定</h1>
+          <p class="muted">MatchingService のアーキテクチャ・技術スタックと選定理由</p>
+        </div>
+        <div class="topbar-actions">
+          <a class="btn btn-secondary" href="../ER図/index.html">DB ER図</a>
+          <a class="btn btn-secondary" href="../システムイメージ/index.html">画面イメージ</a>
+        </div>
+      </header>
+
+      <p class="req-intro">
+        SES 人材紹介・案件配信メールを Gmail から取り込み、AI で要約して PostgreSQL に保存し、
+        検索 UI と人材×案件マッチング、担当者への提案メール送信までを行うシステム。
+        本ドキュメントは、その実現にあたって採用する技術と方針をまとめたものです。
+      </p>
+
+      <section class="panel req-section">
+        <div class="panel-head"><h2>システム構成（論理）</h2></div>
+        <div class="arch-diagram">
+          <div class="arch-box">
+            <strong>web</strong>
+            <span>Next.js<br />管理・検索 UI</span>
+          </div>
+          <div class="arch-box">
+            <strong>api</strong>
+            <span>FastAPI<br />検索・マッチング API</span>
+          </div>
+          <div class="arch-box">
+            <strong>db</strong>
+            <span>PostgreSQL 16<br />永続データ</span>
+          </div>
+          <div class="arch-box">
+            <strong>batch</strong>
+            <span>Python ワンショット<br />Gmail 取込 + AI 要約（手動）</span>
+          </div>
+          <div class="arch-box">
+            <strong>外部 API</strong>
+            <span>Gmail API / Cursor API / OpenAI API</span>
+          </div>
+          <div class="arch-box wide">
+            <strong>実行環境</strong>
+            <span>Docker Compose（開発・本番ともコンテナ単位で構成。Dockerfile / compose は <code>.docker/</code> 配下に集約）</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel req-section">
+        <div class="panel-head"><h2>技術スタック一覧</h2></div>
+        <div class="table-wrap">
+          <table class="table tech-table">
+            <thead>
+              <tr>
+                <th>領域</th>
+                <th>採用技術</th>
+                <th>バージョン</th>
+                <th>用途</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>フロントエンド</td>
+                <td>Next.js + React + TypeScript</td>
+                <td class="ver">15.3 / 19.1 / 5.8</td>
+                <td>人材・案件一覧、マッチング結果、企業マスタ、設定画面</td>
+              </tr>
+              <tr>
+                <td>バックエンド API</td>
+                <td>FastAPI + Uvicorn</td>
+                <td class="ver">0.115 / 0.34</td>
+                <td>REST API、OpenAPI 自動生成、検索・マッチング処理の入口</td>
+              </tr>
+              <tr>
+                <td>バッチ</td>
+                <td>Python（api と同一スタック）</td>
+                <td class="ver">3.12</td>
+                <td>Gmail ラベル付きメール取得、AI 要約、DB 保存、ルール採点</td>
+              </tr>
+              <tr>
+                <td>ORM / DB 接続</td>
+                <td>SQLAlchemy + psycopg</td>
+                <td class="ver">2.0 / 3.2</td>
+                <td>PostgreSQL への型安全なアクセス</td>
+              </tr>
+              <tr>
+                <td>データベース</td>
+                <td>PostgreSQL</td>
+                <td class="ver">16 (Alpine)</td>
+                <td>人材・案件・企業・マッチ結果・送信履歴の保存</td>
+              </tr>
+              <tr>
+                <td>AI</td>
+                <td>Cursor API（初期検証） / OpenAI API（代替候補）</td>
+                <td class="ver">設定値で切替</td>
+                <td>メールから人材/案件情報を抽出・要約。マッチング本体はルールベースを基本とし、上位候補のみ LLM 補助を利用</td>
+              </tr>
+              <tr>
+                <td>メール取込</td>
+                <td>Gmail API（OAuth 2.0）</td>
+                <td class="ver">—</td>
+                <td>ラベル付き SES メールの手動取得</td>
+              </tr>
+              <tr>
+                <td>コンテナ</td>
+                <td>Docker + Docker Compose</td>
+                <td class="ver">—</td>
+                <td>ローカル開発・デプロイの標準実行環境</td>
+              </tr>
+              <tr>
+                <td>設定管理</td>
+                <td>.env + pydantic-settings</td>
+                <td class="ver">2.9</td>
+                <td>DB 接続・API キー・Gmail ラベル名などの環境変数</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel req-section">
+        <div class="panel-head"><h2>選定理由</h2></div>
+
+        <div class="reason-card">
+          <h3>Python + FastAPI（API / バッチ共通）</h3>
+          <p>
+            Gmail SDK・外部 AI API クライアントを Python から利用でき、メール取込・要約・マッチングを同一言語で実装できる。
+            FastAPI は型ヒント・自動 OpenAPI ドキュメント・非同期対応があり、小規模チームでも API 仕様の共有が容易。
+            バッチは常駐ワーカーではなく<strong>ワンショット実行</strong>とし、画面・API・<code>docker compose run</code> からの<strong>手動起動のみ</strong>とする。
+          </p>
+        </div>
+
+        <div class="reason-card">
+          <h3>Next.js（フロントエンド）</h3>
+          <p>
+            管理画面主体の CRUD・検索・詳細表示に適したフルスタック React フレームワーク。
+            TypeScript による型安全、App Router によるルーティング、本番向け standalone ビルドを Docker で配信。
+            API は FastAPI に分離し、フロントは BFF なしの直接呼び出し（<code>NEXT_PUBLIC_API_URL</code>）とする。
+          </p>
+        </div>
+
+        <div class="reason-card">
+          <h3>PostgreSQL</h3>
+          <p>
+            人材・案件・マッチ結果・送信履歴などリレーショナルなデータが中心。
+            JSONB（スキル配列・設定値）も使えるため、構造化データと柔軟な属性を両立できる。
+            全文検索拡張や集計クエリも将来追加しやすい。
+          </p>
+        </div>
+
+        <div class="reason-card">
+          <h3>Gmail API + 手動バッチ</h3>
+          <p>
+            受信トレイのラベル（<code>SES人材紹介</code> / <code>SES案件配信</code>）で対象メールを絞り込み。
+            リアルタイム Push ではなく<strong>手動バッチ取込</strong>とすることで、再実行・冪等性の管理が容易。
+            OAuth トークン・credentials は <code>secrets/</code> に配置し git 管理外とする。
+          </p>
+        </div>
+
+        <div class="reason-card">
+          <h3>AI 利用方針（Cursor API 初期検証 / OpenAI API 代替）</h3>
+          <p>
+            初期実装では Cursor API を使ってメール抽出・要約品質を検証する。結果が要件を満たさない場合は、
+            OpenAI API など別 LLM へ切り替えられるよう、AI 呼び出し部はプロバイダ差し替え可能な構成とする。
+            コスト抑制のため、LLM は主に Gmail ラベルで分けた案件/要員メールの構造化抽出に利用し、
+            マッチング本体は必須スキル一致率、尚可スキル一致率、単価差分、稼働開始日、勤務地/リモート条件、
+            業務領域キーワード、過去応募状況を用いたルールベーススコアを基本とする。
+          </p>
+          <ul>
+            <li>① BAT-001 メール振り分けバッチを手動実行し、案件メール・要員メールを Gmail ラベルで分ける。</li>
+            <li>② ①完了後に BAT-002 メール取込バッチを実行し、AI を用いて案件/要員ごとの専用 schema へ要約・JSON 出力する。</li>
+            <li>③ ②完了後に BAT-006 過去データ削除を実行し、設定した保持日数を超えた取込データを DB から削除する（0 の場合はスキップ）。</li>
+            <li>④ ③完了後に BAT-003 で全案件に対して要員ごとのルールスコアを採点する。</li>
+            <li>⑤ 提案送信・返信同期・AI判定は画面から手動実行する。</li>
+            <li>同じ案件×要員の組み合わせはキャッシュし、再評価によるトークン消費を抑える。</li>
+          </ul>
+        </div>
+
+        <div class="reason-card">
+          <h3>Docker Compose（手動バッチ）</h3>
+          <p>
+            db / api / web / batch を一括起動でき、開発環境の再現性が高い。
+            バッチは Ofelia 等の cron では起動せず、画面・API・<code>docker compose run</code> から手動実行する。
+            アプリコード（<code>api/</code> <code>batch/</code> <code>web/</code>）と Docker 定義（<code>.docker/</code>）を分離し、責務を明確化。
+          </p>
+        </div>
+      </section>
+
+      <section class="panel req-section">
+        <div class="panel-head"><h2>ディレクトリ・デプロイ方針</h2></div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr><th>パス</th><th>内容</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>api/</code></td><td>FastAPI アプリ本体（<code>/health</code> 等）</td></tr>
+              <tr><td><code>batch/</code></td><td>Gmail 取込・要約のワンショットエントリポイント</td></tr>
+              <tr><td><code>web/</code></td><td>Next.js フロントエンド</td></tr>
+              <tr><td><code>.docker/</code></td><td>docker-compose.yml、各サービスの Dockerfile</td></tr>
+              <tr><td><code>secrets/</code></td><td>Gmail OAuth 用 JSON（git 管理外）</td></tr>
+              <tr><td><code>.env</code></td><td>環境変数（<code>.env.example</code> をテンプレートにコピー）</td></tr>
+              <tr><td><code>設計書/</code></td><td>システム要件・ER 図・画面イメージ</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h3>エンドポイント（開発時）</h3>
+        <ul>
+          <li>Web: <code>http://localhost:3000</code></li>
+          <li>API: <code>http://localhost:8000</code>（OpenAPI: <code>/docs</code>）</li>
+          <li>PostgreSQL: <code>localhost:5432</code></li>
+        </ul>
+      </section>
+
+      <section class="panel req-section">
+        <div class="panel-head"><h2>外部連携・認証情報</h2></div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr><th>連携先</th><th>認証</th><th>主な用途</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Gmail API</td>
+                <td>OAuth 2.0（<code>credentials.json</code> + <code>token.json</code>）</td>
+                <td>ラベル付きメールの一覧取得・本文取得</td>
+              </tr>
+              <tr>
+                <td>Cursor API / OpenAI API</td>
+                <td>API キー（<code>CURSOR_API_KEY</code> / <code>OPENAI_API_KEY</code>）</td>
+                <td>人材/案件メールの抽出・要約、ルール上位候補に対する補助評価・理由生成</td>
+              </tr>
+              <tr>
+                <td>PostgreSQL</td>
+                <td>接続文字列（<code>DATABASE_URL</code>）</td>
+                <td>全永続データの読み書き</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="muted" style="margin-top:10px;">
+          提案メール送信も Gmail API 経由（元メールへの返信）。送信履歴は <code>outreach_messages</code>（および案件側は <code>outreach_message_talents</code>）に保存。
+          件名・本文は企業ごとの DB テンプレートではなく、コード内の固定フォーマットで生成する（BAT-007 / BAT-009）。
+        </p>
+      </section>
+
+      <section class="panel req-section">
+        <div class="panel-head"><h2>検討したが採用しなかった案</h2></div>
+        <ul class="rejected-list">
+          <li>
+            <strong>企業ごとの DB メールテンプレート（email_templates）</strong>
+            <span>提案文面は BAT-007 / BAT-009 の固定フォーマットとし、企業別テンプレ編集 UI・テーブルは持たない。要員提案のみ送信前に本文編集可。</span>
+          </li>
+          <li>
+            <strong>常駐ワーカー（Celery / RQ 等）</strong>
+            <span>常時キューは不要のため、ワンショット batch を画面・API から手動実行する方が運用・デバッグが単純。</span>
+          </li>
+          <li>
+            <strong>Node.js バックエンド（Express / NestJS）</strong>
+            <span>AI・Gmail 連携のライブラリ成熟度で Python を優先。フロントのみ Node/Next.js と役割分担。</span>
+          </li>
+          <li>
+            <strong>MySQL / SQLite</strong>
+            <span>JSONB・複雑な集計・将来の全文検索を見込み PostgreSQL を採用。</span>
+          </li>
+          <li>
+            <strong>Gmail Push（Pub/Sub リアルタイム通知）</strong>
+            <span>インフラ設定が重く、SES メール取込は数分〜十数分遅延が許容されるためポーリングで十分。</span>
+          </li>
+          <li>
+            <strong>自前 LLM / ローカルモデル</strong>
+            <span>要約・抽出品質と開発速度を優先し、当面は外部 LLM API（初期は Cursor API）を利用。</span>
+          </li>
+          <li>
+            <strong>モノリシック構成（Next.js API Routes のみ）</strong>
+            <span>バッチと API のライフサイクルが異なるため、FastAPI と batch を分離。</span>
+          </li>
+        </ul>
+      </section>
+
+      <section class="panel req-section">
+        <div class="panel-head"><h2>今後の技術的検討事項</h2></div>
+        <ul>
+          <li><strong>DB マイグレーション</strong> — Alembic 導入（スキーマは <a href="../ER図/index.html">ER 図</a> を参照）</li>
+          <li><strong>認証・認可</strong> — 管理画面のアクセス制御（社内利用想定のため初期は未実装）</li>
+          <li><strong>テスト</strong> — pytest（API / batch）、Playwright または Vitest（web）</li>
+          <li><strong>本番デプロイ</strong> — クラウド VM + Compose、または ECS / Cloud Run 等への移行</li>
+          <li><strong>監視・ログ</strong> — 構造化ログ、バッチ失敗アラート</li>
+          <li><strong>メール送信</strong> — Gmail API send と、失敗時リトライ・下書き保存の設計</li>
+        </ul>
+        <div class="tag-row">
+          <span class="chip">Alembic</span>
+          <span class="chip">OpenAPI クライアント生成</span>
+          <span class="chip">CI（lint / test）</span>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>エラーコード一覧 — MatchingService 設計書</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">MS</span>
+        <div>
+          <strong>MatchingService</strong>
+          <small>設計書</small>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="nav-item" href="../システム要件/index.html">技術選定</a>
+        <a class="nav-item" href="../基本設計書/画面設計書/index.html">画面設計書</a>
+        <a class="nav-item" href="../基本設計書/バッチ設計書/index.html">バッチ設計書</a>
+        <a class="nav-item" href="../基本設計書/共通機能/index.html">共通機能</a>
+        <a class="nav-item" href="../ER図/index.html">DB ER図</a>
+        <a class="nav-item" href="../システムイメージ/index.html">システムイメージ</a>
+        <a class="nav-item is-active" href="index.html">エラーコード一覧</a>
+      </nav>
+    </aside>
+
+    <main class="main main--errors">
+      <header class="topbar">
+        <div>
+          <h1>エラーコード一覧</h1>
+          <p class="muted">画面・API・バッチで共通利用するエラーコードと表示メッセージ</p>
+        </div>
+        <div class="topbar-actions">
+          <a class="btn btn-secondary" href="../基本設計書/画面設計書/index.html">画面設計書</a>
+          <a class="btn btn-secondary" href="../基本設計書/バッチ設計書/index.html">バッチ設計書</a>
+        </div>
+      </header>
+
+      <section class="panel error-section">
+        <div class="panel-head"><h2>採番ルール</h2></div>
+        <ul>
+          <li>形式は <code>ERR-xxxx</code>（4桁ゼロ埋め）とし、<code>ERR-0001</code> から連番で採番する。</li>
+          <li>画面側・バックエンド側とも同じコードを利用し、API レスポンスには <code>error_code</code> と <code>error_message</code>（利用者向け文言）を含める。</li>
+          <li>画面側は処理開始前チェックで検知できるものを API 呼び出し前に止め、同じコード・メッセージを表示する。</li>
+          <li>未知の例外は握りつぶさず、ログには詳細、画面には汎用メッセージを表示する。</li>
+        </ul>
+      </section>
+
+      <section class="panel error-section">
+        <div class="panel-head"><h2>エラーコード一覧</h2></div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>コード</th>
+                <th>分類</th>
+                <th>メッセージ</th>
+                <th>主な発生条件</th>
+                <th>処理方針</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td class="error-code">ERR-0001</td><td class="error-category">入力</td><td>必須項目を入力してください。</td><td>必須入力が未入力</td><td>画面で該当項目を強調し、API 呼び出し前に停止</td></tr>
+              <tr><td class="error-code">ERR-0002</td><td class="error-category">入力</td><td>入力形式が正しくありません。</td><td>メールアドレス、URL、数値などの形式不正</td><td>画面で該当項目を強調し、再入力を促す</td></tr>
+              <tr><td class="error-code">ERR-0003</td><td class="error-category">入力</td><td>指定できる範囲を超えています。</td><td>スコア 0〜100、件数上限、文字数上限の超過</td><td>画面で範囲を提示し、API 呼び出し前に停止</td></tr>
+              <tr><td class="error-code">ERR-0004</td><td class="error-category">入力</td><td>対象を選択してください。</td><td>送信対象、マッチング対象、削除対象が未選択</td><td>画面で選択を促す</td></tr>
+              <tr><td class="error-code">ERR-0005</td><td class="error-category">入力</td><td>検索条件を見直してください。</td><td>検索条件の組み合わせが不正、日付 From/To 逆転</td><td>検索実行前に停止</td></tr>
+              <tr><td class="error-code">ERR-0006</td><td class="error-category">入力</td><td>送信先メールアドレスを確認してください。</td><td>宛先/CC/BCC が空または形式不正</td><td>送信前に停止</td></tr>
+              <tr><td class="error-code">ERR-0007</td><td class="error-category">操作</td><td>処理中です。完了するまでお待ちください。</td><td>二重クリック、同一処理の多重実行</td><td>ボタンを disabled にし、重複送信を防止</td></tr>
+              <tr><td class="error-code">ERR-0008</td><td class="error-category">操作</td><td>入力内容に未保存の変更があります。</td><td>画面遷移前に編集内容が未保存</td><td>確認ダイアログを表示</td></tr>
+              <tr><td class="error-code">ERR-0009</td><td class="error-category">認証</td><td>ログイン状態を確認してください。</td><td>将来の認証導入時にセッションなし/期限切れ</td><td>ログイン画面へ誘導</td></tr>
+              <tr><td class="error-code">ERR-0010</td><td class="error-category">認可</td><td>この操作を実行する権限がありません。</td><td>権限不足</td><td>操作を停止し、管理者へ確認を促す</td></tr>
+              <tr><td class="error-code">ERR-0011</td><td class="error-category">API</td><td>リクエスト内容が不正です。</td><td>API のリクエスト JSON 不正、型不一致</td><td>400 を返し、詳細はログへ記録</td></tr>
+              <tr><td class="error-code">ERR-0012</td><td class="error-category">API</td><td>対象データが見つかりません。</td><td>ID 指定の対象が存在しない</td><td>404 を返し、一覧へ戻る導線を表示</td></tr>
+              <tr><td class="error-code">ERR-0013</td><td class="error-category">API</td><td>他の処理で更新されています。再読み込みしてください。</td><td>楽観ロック、更新日時不一致</td><td>409 を返し、再読み込みを促す</td></tr>
+              <tr><td class="error-code">ERR-0014</td><td class="error-category">DB</td><td>データベースに接続できません。</td><td>DB 接続不可、ヘルスチェック失敗</td><td>処理開始前に停止し、ログへ接続先を記録</td></tr>
+              <tr><td class="error-code">ERR-0015</td><td class="error-category">DB</td><td>データの保存に失敗しました。</td><td>INSERT/UPDATE 失敗、制約違反</td><td>トランザクションを rollback</td></tr>
+              <tr><td class="error-code">ERR-0016</td><td class="error-category">設定</td><td>必要な設定が不足しています。</td><td>環境変数、system_settings の必須キー不足</td><td>処理開始前に停止</td></tr>
+              <tr><td class="error-code">ERR-0017</td><td class="error-category">設定</td><td>設定値が不正です。</td><td>cron、ラベル名、スコア閾値、モデル名の不正</td><td>設定保存またはバッチ開始前に停止</td></tr>
+              <tr><td class="error-code">ERR-0018</td><td class="error-category">Gmail</td><td>Gmail が連携されていません。</td><td><code>credentials.json</code> / <code>token.json</code> 不足</td><td>再連携を促す</td></tr>
+              <tr><td class="error-code">ERR-0019</td><td class="error-category">Gmail</td><td>Gmail 認証の有効期限が切れています。再連携してください。</td><td>OAuth token 期限切れ、refresh 失敗</td><td>再連携を促す</td></tr>
+              <tr><td class="error-code">ERR-0020</td><td class="error-category">Gmail</td><td>Gmail ラベルが見つかりません。</td><td>設定された人材/案件ラベルが存在しない</td><td>設定画面でラベル名確認を促す</td></tr>
+              <tr><td class="error-code">ERR-0021</td><td class="error-category">Gmail</td><td>Gmail メールの取得に失敗しました。</td><td>Gmail API 一覧/本文取得失敗</td><td>メール単位で失敗記録、全件不可ならバッチ異常終了</td></tr>
+              <tr><td class="error-code">ERR-0022</td><td class="error-category">Gmail</td><td>Gmail メールの送信に失敗しました。</td><td>Gmail API send 失敗</td><td>送信履歴を確定せず、再送可能状態にする</td></tr>
+              <tr><td class="error-code">ERR-0023</td><td class="error-category">AI</td><td>AI API キーが設定されていません。</td><td><code>CURSOR_API_KEY</code> / <code>OPENAI_API_KEY</code> 未設定</td><td>AI 要約/補助判定開始前に停止</td></tr>
+              <tr><td class="error-code">ERR-0024</td><td class="error-category">AI</td><td>AI 要約または補助判定に失敗しました。</td><td>Cursor/OpenAI API エラー、タイムアウト</td><td>対象単位でエラー保存し、継続可能な処理は続行</td></tr>
+              <tr><td class="error-code">ERR-0025</td><td class="error-category">AI</td><td>AI の出力形式が不正です。</td><td>JSON パース失敗、必須フィールド不足</td><td>要確認ステータスで保存または処理停止</td></tr>
+              <tr><td class="error-code">ERR-0026</td><td class="error-category">マッチング</td><td>マッチング対象がありません。</td><td>対象人材または案件が0件</td><td>実行前に停止し、対象条件の見直しを促す</td></tr>
+              <tr><td class="error-code">ERR-0027</td><td class="error-category">バッチ</td><td>同じバッチが実行中です。</td><td>同一バッチの多重起動</td><td>後続起動をスキップ</td></tr>
+              <tr><td class="error-code">ERR-0028</td><td class="error-category">バッチ</td><td>バッチ処理を開始できません。</td><td>前提チェック失敗、依存サービス停止</td><td>開始前に異常終了</td></tr>
+              <tr><td class="error-code">ERR-0029</td><td class="error-category">外部連携</td><td>外部サービスへの接続がタイムアウトしました。</td><td>Gmail/Cursor/OpenAI 接続タイムアウト</td><td>リトライ後、失敗として記録</td></tr>
+              <tr><td class="error-code">ERR-0030</td><td class="error-category">システム</td><td>システムエラーが発生しました。時間をおいて再度お試しください。</td><td>想定外例外</td><td>詳細はログへ記録し、画面には汎用メッセージを表示</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="error-note">メッセージは利用者向け表示文言（API では <code>error_message</code>、ログでも <code>error_message</code> キーで出力）。ログにはエラーコード、機能ID、モジュール名、メソッド名、処理名、対象ID、外部APIレスポンス要約を記録する。ただしメール本文、OAuth token、API キーは出力しない。ダッシュボード等の画面には <code>ERR-xxxx: メッセージ</code> のみ表示し、ログ本文は出さない。</p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

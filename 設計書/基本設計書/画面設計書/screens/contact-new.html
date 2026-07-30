@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SCR-017 担当者追加 — 基本設計</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">MS</span><div><strong>MatchingService</strong><small>基本設計書</small></div></div>
+      <nav class="nav">
+        <a class="nav-item" href="../index.html">一覧</a>
+        <a class="nav-item" href="contacts.html">担当者一覧</a>
+        <a class="nav-item is-active" href="contact-new.html">担当者追加</a>
+        <a class="nav-item" href="companies.html">企業一覧</a>
+      </nav>
+    </aside>
+    <main class="main main--bd">
+      <header class="topbar">
+        <div><h1>SCR-017 担当者追加</h1><p class="muted">企業に紐づく担当者（主担当・副担当）を新規登録</p></div>
+        <div class="topbar-actions"><a class="btn btn-secondary" href="../../../システムイメージ/contact-new.html">画面イメージ</a></div>
+      </header>
+      <div class="bd-meta"><span>画面ID: SCR-017</span><span>URL: /contacts/new</span><span>クエリ: company_id（任意）</span></div>
+
+      <section class="panel bd-section">
+        <h2>1. 画面概要</h2>
+        <p>既存企業に担当者を追加登録する。提案メール・応募メールの宛先（主担当）および CC（副担当）として利用する。企業追加時の主担当登録（SCR-007）と同様の項目だが、企業は既存マスタから選択する。</p>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>2. 画面遷移</h2>
+        <table class="table flow-table">
+          <tbody>
+            <tr><td>遷移元</td><td>担当者一覧の「担当者を追加」、企業詳細の「担当者を追加」</td></tr>
+            <tr><td>遷移先（成功）</td><td>担当者一覧（登録した担当者が表示）</td></tr>
+            <tr><td>遷移先（キャンセル）</td><td>担当者一覧、または遷移元の企業詳細</td></tr>
+            <tr><td>クエリ</td><td><code>company_id</code> 指定時は企業プルダウンを事前選択</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>3. 入力項目</h2>
+        <table class="table">
+          <thead><tr><th>項目</th><th>必須</th><th>バリデーション</th><th>DB</th></tr></thead>
+          <tbody>
+            <tr><td>企業</td><td>○</td><td>companies に存在すること</td><td>contacts.company_id</td></tr>
+            <tr><td>氏名</td><td>○</td><td>1〜128文字</td><td>contacts.name</td></tr>
+            <tr><td>メールアドレス</td><td>○</td><td>メール形式、同一企業内で重複不可</td><td>contacts.email</td></tr>
+            <tr><td>役割</td><td>○</td><td>primary（主担当）/ secondary（副担当）</td><td>contacts.role</td></tr>
+            <tr><td>電話番号</td><td>—</td><td>—</td><td>contacts.phone</td></tr>
+            <tr><td>備考</td><td>—</td><td>—</td><td>（将来拡張 or notes カラム）</td></tr>
+            <tr><td>有効</td><td>—</td><td>既定 ON</td><td>contacts.is_active</td></tr>
+          </tbody>
+        </table>
+        <p class="muted">主担当は企業ごとに1名を推奨。複数 primary が存在する場合は最古の1名を宛先とする等、API 側でルールを定義する。</p>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>4. 処理仕様</h2>
+        <ol>
+          <li>バリデーション（必須・メール形式・企業内メール重複）</li>
+          <li><code>POST /api/contacts</code> で contacts に INSERT</li>
+          <li>成功時 担当者一覧へリダイレクト（企業フィルタを登録企業に設定可）</li>
+        </ol>
+        <p>企業未登録の場合は <a href="company-new.html">SCR-007 企業追加</a> へのリンクを表示。</p>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>5. API・参照 DB</h2>
+        <p><strong>API:</strong> <code>POST /api/contacts</code>、企業選択肢 <code>GET /api/companies</code></p>
+        <p><strong>DB:</strong> <a href="../../../ER図/index.html#tbl-contacts">contacts</a>、<a href="../../../ER図/index.html#tbl-companies">companies</a></p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

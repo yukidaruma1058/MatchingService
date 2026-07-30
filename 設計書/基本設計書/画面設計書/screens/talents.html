@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SCR-002 人材一覧 — 基本設計</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">MS</span><div><strong>MatchingService</strong><small>基本設計書</small></div></div>
+      <nav class="nav">
+        <a class="nav-item" href="../index.html">一覧</a>
+        <a class="nav-item is-active" href="talents.html">人材一覧</a>
+        <a class="nav-item" href="talent-detail.html">人材詳細</a>
+        <a class="nav-item" href="projects.html">案件一覧</a>
+      </nav>
+    </aside>
+    <main class="main main--bd">
+      <header class="topbar">
+        <div><h1>SCR-002 人材一覧</h1><p class="muted">SES 人材紹介メールから要約・登録された人材の検索・一覧</p></div>
+        <div class="topbar-actions"><a class="btn btn-secondary" href="../../../システムイメージ/talents.html">画面イメージ</a></div>
+      </header>
+      <div class="bd-meta"><span>画面ID: SCR-002</span><span>URL: /talents</span></div>
+
+      <section class="panel bd-section">
+        <h2>1. 画面概要</h2>
+        <p>取込・要約済みの人材をキーワード・応募状況・単価で絞り込み、一覧表示する。各行から人材詳細へ遷移し、応募中案件をインライン表示する。</p>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>2. 画面遷移</h2>
+        <table class="table flow-table">
+          <tbody>
+            <tr><td>遷移元</td><td>ダッシュボード、サイドナビ、人材詳細（戻る）</td></tr>
+            <tr><td>遷移先</td><td>人材詳細（<code>talent_id</code>）、案件詳細、案件一覧</td></tr>
+            <tr><td>クエリ</td><td><code>q</code>（キーワード）、<code>rate</code>（単価上限）、<code>skills</code>（複数）</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>3. 表示項目（一覧）</h2>
+        <table class="table">
+          <thead><tr><th>列</th><th>項目</th><th>DB / 算出</th></tr></thead>
+          <tbody>
+            <tr><td>ID</td><td>表示用短縮 ID</td><td>talents.id</td></tr>
+            <tr><td>氏名</td><td>display_name</td><td>talents</td></tr>
+            <tr><td>所属</td><td>affiliation</td><td>talents</td></tr>
+            <tr><td>単価</td><td>希望単価（万円表示）</td><td>talents.desired_rate</td></tr>
+            <tr><td>状態</td><td>有効 / 無効</td><td>talents.status</td></tr>
+            <tr><td>詳細</td><td>リンク</td><td>—</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>4. 入力・操作</h2>
+        <table class="table">
+          <thead><tr><th>UI</th><th>仕様</th></tr></thead>
+          <tbody>
+            <tr><td>キーワード</td><td>氏名・所属・紹介元・スキル部分一致</td></tr>
+            <tr><td>単価上限</td><td>指定なし、または上限値以下でフィルタ</td></tr>
+            <tr><td>スキル</td><td>カテゴリ別アコーディオンで複数選択（スキルマスタ連動）</td></tr>
+            <tr><td>検索</td><td>クエリパラメータを更新して一覧を絞り込み</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>5. API・参照 DB</h2>
+        <p><strong>API:</strong> <code>GET /api/talents?q=&amp;apply=&amp;rate=</code></p>
+        <p><strong>DB:</strong> <a href="../../../ER図/index.html#tbl-talents">talents</a>、<a href="../../../ER図/index.html#tbl-companies">companies</a>、<a href="../../../ER図/index.html#tbl-applications">applications</a>、<a href="../../../ER図/index.html#tbl-projects">projects</a></p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

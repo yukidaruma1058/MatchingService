@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SCR-016 設定 — 基本設計</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">MS</span><div><strong>MatchingService</strong><small>基本設計書</small></div></div>
+      <nav class="nav">
+        <a class="nav-item" href="../index.html">一覧</a>
+        <a class="nav-item is-active" href="settings.html">設定</a>
+      </nav>
+    </aside>
+    <main class="main main--bd">
+      <header class="topbar">
+        <div><h1>SCR-016 設定</h1><p class="muted">バッチ・Gmail・AI・提案テンプレートの各種設定</p></div>
+        <div class="topbar-actions">
+          <a class="btn btn-secondary" href="../../../システムイメージ/settings.html">画面（連携済み）</a>
+          <a class="btn btn-ghost" href="../../../システムイメージ/settings-gmail-setup.html">画面（Gmail未設定）</a>
+        </div>
+      </header>
+      <div class="bd-meta"><span>画面ID: SCR-016</span><span>URL: /settings</span></div>
+
+      <section class="panel bd-section">
+        <h2>1. 画面概要</h2>
+        <p>システム全体の動作パラメータを管理する。取込パイプライン後のルール採点・AI 判定対象の上位人数、メール振り分けラベル・検索ワード、提案メール送信、連携中の Gmail アカウント、送信元アドレスなどを確認・設定する。</p>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>2. 設定項目</h2>
+        <h3>バッチ / AI採点</h3>
+        <table class="table">
+          <thead><tr><th>設定キー</th><th>UI</th><th>説明</th></tr></thead>
+          <tbody>
+            <tr><td>ai_assist_enabled</td><td>トグル</td><td>ルールスコア採点完了時に、上位候補へ AI 補助評価・理由生成を自動実行。OFF の場合は画面から手動実行</td></tr>
+            <tr><td>ai_judgement_top_n</td><td>数値 1–20</td><td>ai_assist_enabled が ON の場合だけ表示・適用。案件ごとに AI 判定へ渡す上位人数（既定 5）</td></tr>
+            <tr><td>ingest_times</td><td>時刻入力（複数）+ 保存 + 追加</td><td>1日の取込実行時刻（HH:MM）を複数登録。例: 08:00, 12:00。「取込時間を追加」で入力欄を増やす</td></tr>
+            <tr><td>ingest_data_retention_days</td><td>数値 0–3650</td><td>この日数より古い取込データを削除する。0 は自動削除無効。BAT-006 が参照</td></tr>
+          </tbody>
+        </table>
+        <h3>Gmail / AI</h3>
+        <table class="table">
+          <tbody>
+            <tr><td>gmail_connected_account</td><td>連携中 Gmail アカウント（読み取り専用）</td></tr>
+            <tr><td>gmail_auth_status</td><td>連携状態・最終確認日時（読み取り専用）</td></tr>
+            <tr><td>gmail_sort_source_label</td><td>振り分け対象の Gmail ラベル（例: SES未振り分け）</td></tr>
+            <tr><td>gmail_sort_label_talent</td><td>振り分け後の要員ラベル（例: SES人材紹介）</td></tr>
+            <tr><td>gmail_sort_label_project</td><td>振り分け後の案件ラベル（例: SES案件配信）</td></tr>
+            <tr><td>gmail_sort_keywords_talent</td><td>要員判定用検索ワード（改行区切り）</td></tr>
+            <tr><td>gmail_sort_keywords_project</td><td>案件判定用検索ワード（改行区切り）</td></tr>
+            <tr><td>gmail_sort_unknown_label</td><td>判別不能時に付与する Gmail ラベル（例: SES要確認）</td></tr>
+            <tr><td>apply_from_address</td><td>応募・提案メールの送信元</td></tr>
+            <tr><td>outreach_template_project_propose</td><td>案件提案用テンプレート（人材紹介メールへ案件を送る）。プレースホルダ: recipient_name, items</td></tr>
+            <tr><td>outreach_template_talent_propose</td><td>人材提案用テンプレート（案件メールへ要員を送る）。プレースホルダ: project_title, items</td></tr>
+          </tbody>
+        </table>
+        <p class="muted">AI モデルは環境変数（例: <code>OPENAI_MODEL</code> / バッチ設定）で指定し、設定画面の system_settings には持たない。</p>
+        <h3>スキルマスタ</h3>
+        <p>取込時に自動追加されるスキルとカテゴリを管理する。カテゴリはアコーディオンで開閉し、配下スキルのカテゴリ変更・カテゴリ追加/削除・<strong>名前変更</strong>・<strong>並び順変更（↑↓）</strong>が可能。人材一覧・案件一覧のスキル検索選択肢に反映する（<code>GET /api/skills/catalog</code>・カテゴリ更新は <code>PATCH /api/skills/categories/{id}</code>）。</p>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>3. 処理仕様</h2>
+        <ul>
+          <li>保存 → <code>PUT /api/settings</code> で system_settings を一括更新</li>
+          <li>連携中 Gmail アカウントは Gmail API の profile 情報または <code>token.json</code> の認証結果から表示し、画面保存対象には含めない</li>
+          <li>再連携 → Gmail OAuth 認可フローを起動し、成功後に <code>token.json</code> を更新する（設定画面から Client ID/Secret 入力可）</li>
+          <li>gmail_sort_* 設定は BAT-001 メール振り分けバッチの次回実行から適用する</li>
+          <li>振り分けバッチは gmail_sort_source_label 付きメールを対象とし、<strong>件名を優先</strong>して gmail_sort_keywords_talent / gmail_sort_keywords_project と照合する。件名だけで判定できない場合のみ本文先頭（既定 500 文字）も参照する</li>
+          <li>要員キーワードのみヒット → gmail_sort_label_talent、案件キーワードのみヒット → gmail_sort_label_project を付与する</li>
+          <li>件名・本文を合わせても両方に該当する、またはどちらにも該当しない場合は gmail_sort_unknown_label（判別不可）を付与する</li>
+          <li>ingest_data_retention_days は BAT-006 過去データ削除バッチの次回実行から適用する。0 の場合は削除処理をスキップする</li>
+          <li>取込パイプラインの実行順は BAT-001 → BAT-002 → BAT-006 → BAT-003 →（ai_assist_enabled なら BAT-004）→ BAT-008 とする</li>
+          <li>パイプラインではメール取込完了後に全案件×要員をルールベースで採点する（ルールスコアによる足切りは行わない）</li>
+          <li>ai_judgement_top_n は人材詳細・案件詳細の「AI採点」押下時、およびパイプライン内の AI 採点に適用。NG はスコア 0</li>
+          <li>ルール採点の手動実行入口は <a href="projects.html">SCR-004 案件一覧</a>（旧 SCR-010 は廃止）</li>
+          <li>同一案件×同一要員の AI 判定結果がキャッシュ済みの場合は再利用し、AI API 呼び出しを行わない</li>
+        </ul>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>4. 参照 DB</h2>
+        <p><a href="../../../ER図/index.html#tbl-system_settings">system_settings</a>（key-value / JSONB）</p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

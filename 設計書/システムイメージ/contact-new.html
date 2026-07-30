@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>担当者を追加 — MatchingService</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">MS</span>
+        <div>
+          <strong>MatchingService</strong>
+          <small>システムイメージ</small>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="nav-item" href="index.html">ダッシュボード</a>
+        <a class="nav-item" href="talents.html">人材一覧</a>
+        <a class="nav-item" href="projects.html">案件一覧</a>
+        <a class="nav-item" href="companies.html">企業一覧</a>
+        <a class="nav-item is-active" href="contacts.html">担当者一覧</a>
+        <a class="nav-item" href="matching.html">マッチング</a>
+        <a class="nav-item" href="emails.html">メール取込</a>
+        <a class="nav-item" href="settings.html">設定</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1>担当者を追加</h1>
+          <p class="muted">企業に紐づくメール送信先（主担当・副担当）を登録</p>
+        </div>
+        <div class="topbar-actions">
+          <a class="btn btn-secondary" href="contacts.html">キャンセル</a>
+          <button class="btn btn-primary" type="submit" form="contact-form">登録する（イメージ）</button>
+        </div>
+      </header>
+
+      <p class="notice">
+        提案メールの宛先・CC に使用します。主担当は企業ごとに1名を推奨します（複数登録も可能）。
+      </p>
+
+      <form id="contact-form" class="detail-layout" action="contacts.html" method="get">
+        <article class="detail-card">
+          <h2>所属企業</h2>
+          <div class="stack">
+            <div class="field">
+              <label for="company">企業 <span class="required-mark">*</span></label>
+              <select id="company" name="company" required>
+                <option value="" disabled>選択してください</option>
+                <option selected>株式会社クラウドネクスト</option>
+                <option>株式会社フロントラボ</option>
+                <option>株式会社データワークス</option>
+                <option>株式会社テックブリッジ</option>
+                <option>株式会社スキルリンク</option>
+                <option>株式会社アプリット</option>
+              </select>
+              <p class="muted field-hint">未登録の企業は先に <a href="company-new.html">企業を追加</a> してください。</p>
+            </div>
+          </div>
+        </article>
+
+        <article class="detail-card">
+          <h2>担当者情報</h2>
+          <div class="stack">
+            <div class="field">
+              <label for="name">氏名 <span class="required-mark">*</span></label>
+              <input id="name" name="name" type="text" placeholder="例: 山田 花子" required />
+            </div>
+            <div class="field">
+              <label for="email">メールアドレス <span class="required-mark">*</span></label>
+              <input id="email" name="email" type="email" placeholder="例: yamada@cloudnext.example" required />
+            </div>
+            <div class="field">
+              <label for="role">役割 <span class="required-mark">*</span></label>
+              <select id="role" name="role" required>
+                <option value="primary">主担当</option>
+                <option value="secondary" selected>副担当</option>
+              </select>
+              <p class="muted field-hint">主担当は提案メールの宛先、副担当は CC に使われます。</p>
+            </div>
+            <div class="field">
+              <label for="phone">電話番号</label>
+              <input id="phone" name="phone" type="tel" placeholder="例: 03-1234-5678" />
+            </div>
+            <div class="field">
+              <label for="notes">備考</label>
+              <textarea id="notes" name="notes" placeholder="連絡時の注意事項など"></textarea>
+            </div>
+            <div class="toggle-row">
+              <div class="toggle-copy">
+                <strong>有効</strong>
+                <span>OFF にすると送信先の選択肢から除外します。</span>
+              </div>
+              <label class="switch" title="有効">
+                <input type="checkbox" name="is_active" checked />
+                <span></span>
+              </label>
+            </div>
+          </div>
+        </article>
+      </form>
+
+      <section class="panel" style="margin-top:16px;">
+        <div class="panel-head">
+          <h2>登録後の流れ</h2>
+        </div>
+        <ol class="steps-list">
+          <li>担当者を登録 → 担当者一覧へ戻る</li>
+          <li>企業詳細から担当者一覧を確認</li>
+          <li>マッチング詳細で要員を選び、提案メールの宛先として利用</li>
+        </ol>
+        <div class="flow-links" style="margin-top:12px;">
+          <button class="btn btn-primary" type="submit" form="contact-form">登録する（イメージ）</button>
+          <a class="btn btn-ghost" href="contacts.html">担当者一覧へ戻る</a>
+          <a class="btn btn-ghost" href="company-detail.html">企業詳細へ</a>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

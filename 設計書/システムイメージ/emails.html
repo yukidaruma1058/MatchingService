@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>メール取込 — MatchingService</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">MS</span>
+        <div>
+          <strong>MatchingService</strong>
+          <small>システムイメージ</small>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="nav-item" href="index.html">ダッシュボード</a>
+        <a class="nav-item" href="talents.html">人材一覧</a>
+        <a class="nav-item" href="projects.html">案件一覧</a>
+        <a class="nav-item" href="companies.html">企業一覧</a>
+        <a class="nav-item" href="contacts.html">担当者一覧</a>
+        <a class="nav-item" href="matching.html">マッチング</a>
+        <a class="nav-item is-active" href="emails.html">メール取込</a>
+        <a class="nav-item" href="settings.html">設定</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1>メール取込</h1>
+          <p class="muted">Gmail ラベル付きメールの取込・要約状況</p>
+        </div>
+        <div class="topbar-actions">
+          <a class="btn btn-secondary" href="settings.html">設定</a>
+          <a class="btn btn-primary" href="emails.html">今すぐ取込（イメージ）</a>
+        </div>
+      </header>
+
+      <p class="notice">現在の設定: 取込後にルールスコア採点を自動実行、LLM 補助判定も ON。変更は <a href="settings.html">設定</a> から。</p>
+
+      <section class="stats">
+        <article class="stat-card">
+          <span class="stat-label">本日取込</span>
+          <strong class="stat-value">18</strong>
+          <span class="stat-meta">人材 11 / 案件 7</span>
+        </article>
+        <article class="stat-card">
+          <span class="stat-label">未処理</span>
+          <strong class="stat-value">7</strong>
+          <span class="stat-meta">要約待ち</span>
+        </article>
+        <article class="stat-card">
+          <span class="stat-label">自動ルール採点</span>
+          <strong class="stat-value" style="font-size:1.2rem;">ON</strong>
+          <span class="stat-meta"><a href="matching-result.html">結果を見る</a></span>
+        </article>
+        <article class="stat-card">
+          <span class="stat-label">次回 cron</span>
+          <strong class="stat-value" style="font-size:1.2rem;">15分後</strong>
+          <span class="stat-meta">手動</span>
+        </article>
+      </section>
+
+      <section class="panel">
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>受信日時</th>
+                <th>ラベル</th>
+                <th>件名</th>
+                <th>状態</th>
+                <th>登録先</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>07/09 10:02</td>
+                <td><span class="badge badge-brand">案件</span></td>
+                <td>【案件】基幹システム刷新 Java</td>
+                <td><span class="badge badge-ok">要約済</span></td>
+                <td><a href="project-detail.html">P-2208</a></td>
+                <td><a href="project-detail.html">詳細</a></td>
+              </tr>
+              <tr>
+                <td>07/09 09:14</td>
+                <td><span class="badge badge-brand">人材</span></td>
+                <td>【ご提案】Javaエンジニア 即日稼働</td>
+                <td><span class="badge badge-ok">要約済 → ルール採点済</span></td>
+                <td><a href="talent-detail.html">T-1042</a></td>
+                <td><a href="projects.html">案件一覧</a></td>
+              </tr>
+              <tr>
+                <td>07/09 08:41</td>
+                <td><span class="badge badge-brand">人材</span></td>
+                <td>【人材】React / TypeScript 5年</td>
+                <td><span class="badge badge-warn">未処理</span></td>
+                <td>—</td>
+                <td><a href="emails.html">再実行</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>バックエンド基本設計書 — MatchingService</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">MS</span>
+        <div>
+          <strong>MatchingService</strong>
+          <small>基本設計書</small>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="nav-item" href="../画面設計書/index.html">画面設計書</a>
+        <a class="nav-item is-active" href="index.html">バッチ設計書</a>
+        <a class="nav-item" href="../共通機能/index.html">共通機能</a>
+        <p class="nav-group-label">設計書</p>
+        <a class="nav-item" href="../../システム要件/index.html">技術選定</a>
+        <a class="nav-item" href="../../ER図/index.html">DB ER図</a>
+        <a class="nav-item" href="../../エラーコード一覧/index.html">エラーコード一覧</a>
+        <a class="nav-item" href="../../システムイメージ/index.html">画面イメージ</a>
+      </nav>
+    </aside>
+
+    <main class="main main--backend">
+      <header class="topbar">
+        <div>
+          <h1>バックエンド基本設計書</h1>
+          <p class="muted">FastAPI API・Gmail 振り分け/取込バッチ・AI 要約・ルールスコア採点・LLM 補助判定・Gmail 送信の基本設計</p>
+        </div>
+        <div class="topbar-actions">
+          <a class="btn btn-secondary" href="../画面設計書/index.html">画面設計書</a>
+          <a class="btn btn-secondary" href="../../ER図/index.html">DB ER図</a>
+        </div>
+      </header>
+
+      <div class="backend-meta">
+        <span>対象: api/ batch/ .docker/</span>
+        <span>Python 3.12</span>
+        <span>FastAPI</span>
+        <span>手動バッチ実行</span>
+        <span>PostgreSQL</span>
+      </div>
+
+      <section class="panel backend-section">
+        <div class="panel-head"><h2>1. 設計範囲</h2></div>
+        <p>
+          本書は MatchingService のバックエンド側、特に API とバッチ処理の責務・処理フロー・外部連携・DB 更新方針を定義する。
+          画面項目や遷移は <a href="../画面設計書/index.html">画面設計書</a>、テーブル定義は <a href="../../ER図/index.html">DB ER図</a> を正とする。
+        </p>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>領域</th><th>責務</th><th>実装単位</th></tr></thead>
+            <tbody>
+              <tr><td>REST API</td><td>画面からの検索・詳細取得・更新・手動実行要求を受け付ける</td><td><code>api/</code></td></tr>
+              <tr><td>メール振り分けバッチ</td><td>Gmail から未処理メールを取得し、案件/要員ラベルへ振り分ける</td><td><code>batch/BAT-001/</code></td></tr>
+              <tr><td>メール取込バッチ</td><td>案件/要員ラベル付きメールを取得し、AI 要約・JSON 出力後に DB へ保存する</td><td><code>batch/BAT-002/</code></td></tr>
+              <tr><td>過去データ削除</td><td>保持日数を超えた取込データを DB から削除する</td><td><code>batch/BAT-006/</code></td></tr>
+              <tr><td>ルールスコア採点</td><td>全案件に対して要員ごとのルールスコアを算出する</td><td><code>batch/BAT-003/</code> / <code>api/</code></td></tr>
+              <tr><td>LLM 補助判定</td><td>ルールスコア上位者のみ AI 補助評価・理由生成を行う</td><td><code>batch/</code> / <code>api/</code></td></tr>
+              <tr><td>外部連携</td><td>Gmail API、Cursor API / OpenAI API、PostgreSQL への接続を管理する</td><td><code>.env</code> / <code>secrets/</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel backend-section">
+        <div class="panel-head"><h2>2. API 基本設計</h2></div>
+        <p>
+          API は FastAPI で実装し、画面操作に必要な CRUD・検索・手動バッチ実行・送信処理の入口を提供する。
+          レスポンスは JSON とし、日時は ISO 8601、ID は DB の UUID または BIGSERIAL をそのまま返す。
+        </p>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>分類</th><th>エンドポイント案</th><th>概要</th><th>参照画面</th></tr></thead>
+            <tbody>
+              <tr><td>ヘルスチェック</td><td class="api-path"><code>GET /health</code></td><td>API 稼働確認</td><td>運用</td></tr>
+              <tr><td>ダッシュボード</td><td class="api-path"><code>GET /api/dashboard</code></td><td>登録件数、未処理メール、直近取込状況を集計</td><td>SCR-001</td></tr>
+              <tr><td>人材</td><td class="api-path"><code>GET /api/talents</code><br /><code>GET /api/talents/{id}</code></td><td>人材一覧・詳細・応募中案件を取得</td><td>SCR-002/003</td></tr>
+              <tr><td>案件</td><td class="api-path"><code>GET /api/projects</code><br /><code>GET /api/projects/{id}</code></td><td>案件一覧・詳細・マッチ結果を取得</td><td>SCR-004/005</td></tr>
+              <tr><td>企業/担当者</td><td class="api-path"><code>/api/companies</code><br /><code>/api/contacts</code></td><td>企業マスタ・担当者を CRUD（現状 UI は未実装）</td><td>SCR-006〜009/017〜019</td></tr>
+              <tr><td>マッチング</td><td class="api-path"><code>POST /api/match-runs</code><br /><code>POST /api/match-runs/{id}/ai-judge</code></td><td>ルールスコア採点（案件一覧から手動）、または人材/案件詳細からの LLM 補助判定</td><td>SCR-004/003/005</td></tr>
+              <tr><td>提案送信</td><td class="api-path"><code>POST /api/outreach/talent-propose</code><br /><code>POST /api/outreach/talent-propose/preview</code><br /><code>POST /api/outreach/project-propose</code></td><td>要員への案件提案（BAT-007）・案件への要員提案（BAT-009）</td><td>SCR-003/005</td></tr>
+              <tr><td>メール取込</td><td class="api-path"><code>GET /api/emails</code><br /><code>POST /api/batches/gmail-pipeline</code></td><td>取込状況表示、パイプライン手動起動（BAT-001→002→…）</td><td>SCR-015</td></tr>
+              <tr><td>メール取込パイプライン</td><td class="api-path"><code>POST /api/batches/gmail-pipeline</code></td><td>BAT-001 → BAT-002 → BAT-006 → BAT-003 → BAT-008。ダッシュボード／メール取込から起動（sort/ingest 単独 API は無し）</td><td>SCR-001/015</td></tr>
+              <tr><td>設定</td><td class="api-path"><code>GET /api/settings</code><br /><code>PUT /api/settings</code></td><td>system_settings の取得・更新、Gmail 連携状態表示</td><td>SCR-016</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel backend-section">
+        <div class="panel-head"><h2>3. バッチ処理フロー設計</h2></div>
+        <p>
+          バッチはワンショット実行とする。起動は画面・API・``docker compose run`` による<strong>手動実行のみ</strong>（Ofelia 等の定期スケジューラは用いない）。
+          パイプラインは
+          <strong>① BAT-001 → ② BAT-002 → ③ BAT-006 → ④ BAT-003 → ⑤ BAT-008</strong>。
+          要員提案（BAT-007）・AI判定（BAT-004）・案件側提案（BAT-009）は画面手動。返信同期（BAT-008）はパイプライン末尾でも実行し、案件一覧／メール取込から単独実行も可能。
+          同一 Gmail メッセージの重複登録を避けるため、<code>emails.gmail_message_id</code> を一意キーとして冪等に処理する。
+        </p>
+        <div class="flow-steps">
+          <div class="flow-step">
+            <strong>① BAT-001 メール振り分け</strong>
+            <span>手動実行。gmail_sort_source_label 付きメールを取得し、<strong>件名を優先</strong>して検索ワードと照合して要員/案件ラベルへ振り分ける。件名だけで判定できない場合のみ本文先頭（既定 500 文字）も参照する。判別不能時は gmail_sort_unknown_label を付与する。既に振り分け後ラベル（要員/案件/判別不可/取込済み）付きのメールは再振り分けしない。</span>
+          </div>
+          <div class="flow-step">
+            <strong>② BAT-002 メール取込・AI要約</strong>
+            <span>①完了後に実行。案件/要員ラベル付きメールを取得し、AI を用いてラベル種別ごとの JSON schema に抽出・要約する。必須項目不足時は要確認ステータスで保存する。</span>
+          </div>
+          <div class="flow-step">
+            <strong>③ BAT-006 過去データ削除</strong>
+            <span>②完了後に実行。<code>ingest_data_retention_days</code> 設定に基づき、<code>emails.created_at</code> が保持日数より古い取込データを物理削除する。0 の場合はスキップ。Gmail 側は変更しない。削除後に BAT-003 へ進み、マッチング対象件数を抑制する。</span>
+          </div>
+          <div class="flow-step">
+            <strong>④ BAT-003 ルールスコア採点</strong>
+            <span>③完了後に実行。全案件に対して要員ごとのルールスコアを算出し、<code>match_runs</code> / <code>matches</code> に保存する。</span>
+          </div>
+          <div class="flow-step">
+            <strong>⑤ BAT-008 返信同期・OK/NG</strong>
+            <span>④完了後にパイプラインでも実行。送信済み提案（talent_proposal / project_proposal）スレッドの返信を取得し設定ラベルを付与、AI（失敗時はキーワード）で OK/NG を判定。案件一覧／メール取込から単独実行も可。</span>
+          </div>
+          <div class="flow-step">
+            <strong>⑥ BAT-007 要員への案件提案（手動）</strong>
+            <span>画面から選択したマッチを人材紹介メールへ返信送信する。本文は <code>talent_proposal_body</code> / BAT-007 内の固定フォーマット（プレビュー時は本文編集可）。</span>
+          </div>
+          <div class="flow-step">
+            <strong>⑦ BAT-004 AI判定（手動）</strong>
+            <span>画面の AI判定ボタン。NG のルールスコアを 0 にし、OK かつ上位 N 人（案件ごと）に LLM 判定。詳細画面から選択したマッチも対象可。</span>
+          </div>
+          <div class="flow-step">
+            <strong>⑧ BAT-009 案件への要員提案（手動）</strong>
+            <span>同一案件の選択要員をまとめて、案件配信メールへ 1 通の返信で提案する。本文は BAT-009 の <code>_build_body</code> 固定フォーマット（画面での本文編集なし）。</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel backend-section">
+        <div class="panel-head"><h2>4. バッチ一覧</h2></div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>ID</th><th>名称</th><th>起動</th><th>入力</th><th>出力/更新</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><code>BAT-001</code></td>
+                <td>メール振り分け</td>
+                <td>手動 API / 画面</td>
+                <td>Gmail 未処理メール</td>
+                <td>Gmail ラベル、<code>emails</code>（振り分け状態）</td>
+              </tr>
+              <tr>
+                <td><code>BAT-002</code></td>
+                <td>メール取込・AI要約</td>
+                <td>BAT-001 完了後 / 手動 API</td>
+                <td>案件/要員ラベル付きメール</td>
+                <td><code>emails</code>, <code>talents</code>, <code>projects</code></td>
+              </tr>
+              <tr>
+                <td><code>BAT-006</code></td>
+                <td>過去データ削除</td>
+                <td>BAT-002 完了後 / 手動 <code>cleanup</code></td>
+                <td><code>ingest_data_retention_days</code>, <code>emails</code></td>
+                <td><code>emails</code>（将来: <code>talents</code>, <code>projects</code>）</td>
+              </tr>
+              <tr>
+                <td><code>BAT-003</code></td>
+                <td>ルールスコア採点</td>
+                <td>BAT-006 完了後 / 手動 API</td>
+                <td>全案件 × 全候補要員</td>
+                <td><code>match_runs</code>, <code>matches</code>（ルールスコア）</td>
+              </tr>
+              <tr>
+                <td><code>BAT-004</code></td>
+                <td>AI判定</td>
+                <td>画面「AI判定」ボタン（手動）</td>
+                <td>返信 OK/NG 後の matches</td>
+                <td>NG スコア0、OK 上位 N の <code>ai_score</code>/<code>reason</code></td>
+              </tr>
+              <tr>
+                <td><code>BAT-007</code></td>
+                <td>要員への案件提案</td>
+                <td>画面手動 / API</td>
+                <td>選択した matches</td>
+                <td><code>outreach_messages</code>（talent_proposal）</td>
+              </tr>
+              <tr>
+                <td><code>BAT-008</code></td>
+                <td>返信同期・OK/NG</td>
+                <td>パイプライン末尾 / 手動 API・画面</td>
+                <td>talent_proposal スレッド</td>
+                <td><code>outreach_replies</code>、Gmail ラベル</td>
+              </tr>
+              <tr>
+                <td><code>BAT-009</code></td>
+                <td>案件への要員提案</td>
+                <td>画面手動のみ</td>
+                <td>同一案件の OK 要員</td>
+                <td><code>outreach_messages</code> + <code>outreach_message_talents</code></td>
+              </tr>
+              <tr>
+                <td><code>BAT-005</code></td>
+                <td>送信履歴同期（旧）</td>
+                <td>—</td>
+                <td>—</td>
+                <td>BAT-007/009 の outreach に統合</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel backend-section">
+        <div class="panel-head"><h2>5. BAT-001 メール振り分け</h2></div>
+        <p>
+          設定画面の Gmail 振り分け設定に基づき、ソースラベル付きメールを要員/案件/判別不可ラベルへ振り分ける。
+          判定ロジックは <code>batch/BAT-001/classifier.py</code> に実装する。
+        </p>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>項目</th><th>内容</th></tr></thead>
+            <tbody>
+              <tr><td>バッチID</td><td><code>BAT-001</code></td></tr>
+              <tr><td>ジョブ名</td><td><code>sort</code></td></tr>
+              <tr><td>実装</td><td><code>batch/BAT-001/gmail_sort.py</code>, <code>batch/BAT-001/classifier.py</code></td></tr>
+              <tr><td>手動 API</td><td><code>POST /api/batches/gmail-pipeline</code>（ダッシュボード／メール取込）。CLI <code>sort</code> でも単独実行可</td></tr>
+              <tr><td>本文参照長</td><td><code>SORT_BODY_PREVIEW_CHARS</code>（既定 500）。件名だけで判定できない場合のみ本文先頭を使用</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h3>キーワード判定（件名優先）</h3>
+        <ol>
+          <li>件名のみを <code>gmail_sort_keywords_talent</code> / <code>gmail_sort_keywords_project</code> と照合する（大文字小文字は区別しない）。</li>
+          <li>件名で要員キーワードのみヒット → <code>gmail_sort_label_talent</code> を付与。</li>
+          <li>件名で案件キーワードのみヒット → <code>gmail_sort_label_project</code> を付与。</li>
+          <li>件名で両方ヒット、またはどちらもヒットしない → 件名 + 本文先頭（最大 <code>sort_body_preview_chars</code> 文字）を結合したテキストで同じルールを再判定する。</li>
+          <li>再判定でも一意に決まらない → <code>gmail_sort_unknown_label</code>（判別不可）を付与。</li>
+        </ol>
+        <p class="muted">
+          件名に「人材」等が明示されている一方、本文冒頭に営業定型文（「案件・人材・他商材のご紹介をお願いします」等）があり両方ヒットするケースでは、
+          件名優先により要員/案件のいずれかへ振り分けられる。
+        </p>
+        <h3>処理フロー</h3>
+        <ol>
+          <li>バッチ開始ログ（<code>gmail_sort.started</code>）を <code>log/batch.log</code> へ出力する。</li>
+          <li><code>system_settings</code> から振り分けラベル・検索ワードを読み込む（<code>gmail_sort.settings_loaded</code>）。</li>
+          <li>Gmail OAuth で接続し、ソースラベルおよび振り分け先・取込済みラベルの存在を検証する。不足時は <code>ERR-0020</code> で開始前に異常終了する。</li>
+          <li>ソースラベル付きメール ID を列挙し、1 件ずつ本文を取得する。</li>
+          <li>要員/案件/判別不可/取込済みラベルのいずれかが既に付いているメールはスキップする。</li>
+          <li>件名優先のキーワード判定を行い、判定ラベルを付与してソースラベルを除去する（<code>gmail_sort.message_sorted</code>）。</li>
+          <li>振り分け結果を <code>emails</code> テーブルへ upsert する。</li>
+          <li>走査件数・振り分け件数・スキップ件数・失敗件数を含む完了ログ（<code>gmail_sort.finished</code>）を出力する。</li>
+        </ol>
+        <h3>エラー・継続方針</h3>
+        <ul>
+          <li>認証失敗・必須ラベル不足など全件継続不能な事象はバッチ全体を異常終了する（<code>batch.job.failed</code>）。</li>
+          <li>個別メールの取得・ラベル更新失敗は <code>gmail_sort.message_failed</code> として記録し、他メールの処理は継続する。</li>
+          <li>ERROR ログには <code>error_code</code> と利用者向け <code>error_message</code> の両方を含める。API 手動実行時は直近 ERROR を画面へ返す。</li>
+        </ul>
+      </section>
+
+      <section class="panel backend-section">
+        <div class="panel-head"><h2>6. BAT-002 メール取込・AI要約</h2></div>
+        <p>
+          振り分け後の要員/案件ラベル付きメールを取得し、AI で JSON 抽出し <code>talents</code> / <code>projects</code> へ保存する。
+          実装は <code>batch/BAT-002/</code>。
+        </p>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>項目</th><th>内容</th></tr></thead>
+            <tbody>
+              <tr><td>バッチID</td><td><code>BAT-002</code></td></tr>
+              <tr><td>ジョブ名</td><td><code>ingest</code></td></tr>
+              <tr><td>実装</td><td><code>batch/BAT-002/gmail_ingest.py</code>, <code>batch/BAT-002/summarizer.py</code></td></tr>
+              <tr><td>手動 API</td><td><code>POST /api/batches/gmail-pipeline</code>（ダッシュボード／メール取込）。CLI <code>ingest</code> でも単独実行可</td></tr>
+              <tr><td>参照 API</td><td><code>GET /api/emails</code>, <code>GET /api/talents</code>, <code>GET /api/projects</code>, <code>GET /api/dashboard</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h3>AI プロバイダ優先順</h3>
+        <ol>
+          <li><code>CURSOR_API_KEY</code> あり → Cursor SDK（<code>cursor-sdk</code>）で JSON 抽出</li>
+          <li>なければ <code>OPENAI_API_KEY</code> → OpenAI Chat Completions（JSON mode）</li>
+          <li>どちらも無い → 件名 + 本文先頭のヒューリスティック（常に <code>needs_review</code>）</li>
+        </ol>
+        <h3>処理フロー</h3>
+        <ol>
+          <li>開始ログ（<code>gmail_ingest.started</code>）を <code>log/batch.log</code> へ出力する。</li>
+          <li>人材/案件/処理済みラベルの存在を検証する（不足時 <code>ERR-0020</code>）。</li>
+          <li>人材ラベル・案件ラベル付きメールを列挙し、処理済み付きはスキップする。</li>
+          <li>AI 抽出結果を正規化し、<code>emails</code> を upsert したうえで <code>talents</code> または <code>projects</code> を <code>email_id</code> UNIQUE で upsert する。</li>
+          <li>必須欠落時は <code>emails.status=needs_review</code>、完全失敗時は <code>failed</code>（Gmail は処理済みへ移さない）。成功時は処理済みラベルへ付け替え。</li>
+          <li>完了ログ（<code>gmail_ingest.finished</code>）を出力する。</li>
+        </ol>
+      </section>
+
+      <section class="panel backend-section">
+        <div class="panel-head"><h2>6.5 BAT-003 ルールスコア採点</h2></div>
+        <p>
+          全 <code>active</code> 人材 × <code>open</code> 案件をルールベースで採点し、<code>match_runs</code> / <code>matches</code> に保存する。
+          実装は <code>batch/BAT-003/</code>。足切りは行わない。案件一覧のスコア帯はこのルールスコアを正とする。
+        </p>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>項目</th><th>内容</th></tr></thead>
+            <tbody>
+              <tr><td>バッチID</td><td><code>BAT-003</code></td></tr>
+              <tr><td>ジョブ名</td><td><code>match</code></td></tr>
+              <tr><td>実装</td><td><code>batch/BAT-003/match_score.py</code>, <code>scorer.py</code>, <code>google_routes.py</code>, <code>commute.py</code></td></tr>
+              <tr><td>手動 API</td><td><code>POST /api/match-runs</code></td></tr>
+              <tr><td>参照 API</td><td><code>GET /api/match-runs</code>, <code>GET /api/match-runs/{id}/matches</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h3>配点（合計 100）</h3>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>観点</th><th>配点</th><th>内容</th></tr></thead>
+            <tbody>
+              <tr><td>スキル一致</td><td>40</td><td>必須スキルカバー率。必須空→中立20、人材スキル空→0</td></tr>
+              <tr><td>単価適合</td><td>25</td><td>希望単価 vs rate_min/max</td></tr>
+              <tr><td>稼働時期</td><td>15</td><td>available_from vs start_date</td></tr>
+              <tr><td>勤務形態</td><td>10</td><td>work_style のみ（地名一致はしない）</td></tr>
+              <tr><td>通勤時間</td><td>10</td><td>Google Routes TRANSIT。未取得・欠損→中立5。フルリモート→10（API なし）</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h3>二パス採点</h3>
+        <ol>
+          <li><strong>Pass1</strong>: 全組合せを採点。通勤は中立 5（API 呼び出しなし）。</li>
+          <li><strong>Pass2</strong>: 案件ごとに Pass1 上位 <code>ai_judgement_top_n</code>（既定5）人だけ Google Routes で通勤分を確定しスコアを更新。</li>
+          <li>駅ペアは <code>commute_cache</code> に保存し再利用する。</li>
+          <li>月次カウンタ <code>commute_api_usage</code>: 8,000 で警告、10,000 で Pass2 の API 呼び出し停止（アプリ側制御）。</li>
+        </ol>
+        <h3>Google Routes 設定</h3>
+        <ol>
+          <li>Google Cloud で Billing を有効化し、<strong>Routes API</strong> を有効化する。</li>
+          <li>API キーを作成し Routes API に制限する。</li>
+          <li><code>.env</code> に <code>GOOGLE_MAPS_API_KEY</code> を設定する（未設定時は通勤中立のまま）。</li>
+          <li>無料枠は Compute Routes Essentials 月 10,000 回。compose の <code>environment</code> で空文字上書きしないこと。</li>
+        </ol>
+        <h3>処理フロー</h3>
+        <ol>
+          <li>開始ログ（<code>matching.rule_score.started</code>）。</li>
+          <li>人材または案件が 0 件なら <code>ERR-0026</code> で停止。</li>
+          <li><code>match_runs</code> を作成し Pass1/Pass2 を実行、<code>matches</code> を保存。</li>
+          <li>完了ログ（<code>matching.rule_score.finished</code>）。</li>
+        </ol>
+      </section>
+
+      <section class="panel backend-section">
+        <div class="panel-head"><h2>7. BAT-006 過去データ削除</h2></div>
+        <p>
+          設定画面で指定した保持日数（<code>ingest_data_retention_days</code>）を超えた取込データを PostgreSQL から削除する。
+          Gmail 上のメールやラベルは変更せず、本システム DB に登録された取込データのみを対象とする。
+          取込パイプラインでは BAT-002 完了後に実行し、古いデータを掃除したうえで BAT-003 へ進める。
+        </p>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>項目</th><th>内容</th></tr></thead>
+            <tbody>
+              <tr><td>バッチID</td><td><code>BAT-006</code></td></tr>
+              <tr><td>ジョブ名</td><td><code>cleanup</code></td></tr>
+              <tr><td>実装</td><td><code>batch/BAT-006/</code></td></tr>
+              <tr><td>手動 API</td><td><code>POST /api/batches/ingest-cleanup</code> / パイプライン内（BAT-002 の後）</td></tr>
+              <tr><td>設定</td><td><code>system_settings.ingest_data_retention_days</code>（0 = 削除しない）</td></tr>
+              <tr><td>判定基準日</td><td><code>emails.created_at</code>（DB 登録日時）</td></tr>
+              <tr><td>連動削除</td><td><code>talents</code> / <code>projects</code> は <code>email_id</code> の <code>ON DELETE CASCADE</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h3>処理フロー</h3>
+        <ol>
+          <li>バッチ開始ログ（<code>ingest_cleanup.started</code>）を出力する。</li>
+          <li><code>system_settings</code> から <code>ingest_data_retention_days</code> を読み込む。未設定時は環境変数 <code>INGEST_DATA_RETENTION_DAYS</code>、それも無ければ 0 とする。</li>
+          <li>保持日数が 0 以下の場合、削除せず <code>ingest_cleanup.skipped</code> を出力して正常終了する。</li>
+          <li>削除基準日時 <code>cutoff = now() - retention_days</code> を算出する。</li>
+          <li><code>emails.created_at &lt; cutoff</code> に該当するレコードを物理削除する。</li>
+          <li>（将来）<code>talents</code> / <code>projects</code> で取込元 <code>email_id</code> が削除対象に紐づくレコードを削除する。</li>
+          <li>（将来）孤立した <code>matches</code> 等の関連データを整理する。初版では <code>emails</code> のみ。</li>
+          <li>削除件数・保持日数・処理時間を含む完了ログ（<code>ingest_cleanup.finished</code>）を出力する。</li>
+        </ol>
+        <h3>削除対象と DB 方針</h3>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>フェーズ</th><th>対象テーブル</th><th>条件</th><th>備考</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>初版</td>
+                <td><code>emails</code></td>
+                <td><code>created_at &lt; cutoff</code></td>
+                <td>振り分け・取込の元データ。Gmail 側は触らない。</td>
+              </tr>
+              <tr>
+                <td>将来拡張</td>
+                <td><code>talents</code>, <code>projects</code></td>
+                <td>紐づく <code>email_id</code> のメールが削除対象</td>
+                <td>BAT-002 実装完了後に連動削除を追加。</td>
+              </tr>
+              <tr>
+                <td>対象外</td>
+                <td><code>companies</code>, <code>contacts</code>, <code>applications</code>, <code>outreach_messages</code></td>
+                <td>—</td>
+                <td>マスタ・応募・送信履歴は保持期間削除の対象外。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <ul>
+          <li>削除は物理削除（DELETE）とする。1 トランザクションで完結し、途中失敗時はロールバックする。</li>
+          <li>削除件数 0 件でも正常終了とする。DB エラー時のみ異常終了（<code>ERR-0030</code> 等）。</li>
+          <li>設定値が範囲外の場合は <code>ERR-0017</code> としてバッチ開始前に停止する。</li>
+          <li>ログの <code>function_id</code> は <code>BAT-006</code>、<code>module</code> は <code>BAT-006.cleanup</code> とする。</li>
+        </ul>
+      </section>
+
+      <section class="panel backend-section">
+        <div class="panel-head"><h2>8. 外部連携設計</h2></div>
+        <h3>Gmail API</h3>
+        <ul>
+          <li>認証は OAuth 2.0。<code>secrets/credentials.json</code> と <code>secrets/token.json</code> を Docker volume で <code>/secrets</code> に読み取り専用マウントする。</li>
+          <li>連携中アカウントは Gmail profile API で取得し、設定画面に読み取り専用で表示する。</li>
+          <li>取込対象は <code>gmail_sort_label_talent</code> / <code>gmail_sort_label_project</code> のラベル付きメール。</li>
+          <li>送信は Gmail API の send を利用し、送信成功後に Gmail メッセージ ID を保存する。</li>
+        </ul>
+        <h3>AI API（Cursor API / OpenAI API）</h3>
+        <ul>
+          <li>初期検証は <code>CURSOR_API_KEY</code> と Cursor API を使用する。結果が要件を満たさない場合は OpenAI API など別プロバイダへ切り替える。</li>
+          <li>要約出力は JSON schema 相当の構造を期待し、パース失敗時はメール処理状態をエラーとして保持する。</li>
+          <li>マッチング本体はルールベースで行う。LLM 補助判定はルールスコア採点の後続処理として、案件ごとのルールスコア上位 <code>ai_judgement_top_n</code> 件だけに限定する。</li>
+          <li>同じ案件×要員の AI 判定結果が存在する場合はキャッシュを利用し、AI API 呼び出しを抑制する。</li>
+        </ul>
+      </section>
+
+      <section class="panel backend-section">
+        <div class="panel-head"><h2>9. DB 更新・トランザクション方針</h2></div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>処理</th><th>主テーブル</th><th>方針</th></tr></thead>
+            <tbody>
+              <tr><td>メール振り分け</td><td><code>emails</code></td><td><code>gmail_message_id</code> を一意キーに upsert し、メール種別・ラベル付与状態を管理する。既存メールは本文・ステータスを破壊的に上書きしない。</td></tr>
+              <tr><td>メール取込・AI要約</td><td><code>emails</code>, <code>talents</code>, <code>projects</code></td><td>案件/要員ラベルごとの専用 schema で JSON 抽出し、要約結果を登録する。</td></tr>
+              <tr><td>過去データ削除</td><td><code>emails</code></td><td><code>ingest_data_retention_days</code> を超えた <code>emails.created_at</code> のレコードを物理削除する。Gmail 側は変更しない。</td></tr>
+              <tr><td>人材/案件登録</td><td><code>talents</code>, <code>projects</code></td><td>1メールにつき原則1レコード。再要約時は履歴方針確定までは要確認として扱う。</td></tr>
+              <tr><td>ルールスコア採点</td><td><code>match_runs</code>, <code>matches</code></td><td>全案件×要員のルールスコアを保存する。案件一覧の最高スコア・スコア帯はこの値を利用する。</td></tr>
+              <tr><td>LLM 補助判定</td><td><code>matches</code></td><td>上位候補のみ AI 補助評価結果・理由を追記する。同一案件×要員の AI 判定はキャッシュ再利用する。</td></tr>
+              <tr><td>応募/提案送信</td><td><code>applications</code>, <code>proposals</code>, <code>sent_emails</code></td><td>Gmail 送信成功後に送信履歴を確定。失敗時は送信済みにしない。</td></tr>
+              <tr><td>設定更新</td><td><code>system_settings</code></td><td>画面保存時に key-value を一括更新。認証ファイルは DB 保存しない。</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel backend-section">
+        <div class="panel-head"><h2>10. 処理開始前チェック</h2></div>
+        <p>
+          API・バッチとも、主処理に入る前に前提条件を検証する。失敗時は処理を開始せず、
+          <a href="../../エラーコード一覧/index.html">エラーコード一覧</a> の <code>ERR-xxxx</code> を返却またはログ出力する。
+        </p>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>対象</th><th>チェック内容</th><th>エラーコード</th><th>失敗時の扱い</th></tr></thead>
+            <tbody>
+              <tr><td>API 共通</td><td>リクエスト JSON、型、必須パラメータ、ID 形式</td><td><code>ERR-0011</code></td><td>400 を返し、主処理を実行しない</td></tr>
+              <tr><td>API 更新系</td><td>対象データ存在、更新日時、重複操作</td><td><code>ERR-0012</code> / <code>ERR-0013</code></td><td>404/409 を返し、トランザクションを開始しない</td></tr>
+              <tr><td>DB 利用処理</td><td>DB 接続、必須テーブル、トランザクション開始可否</td><td><code>ERR-0014</code> / <code>ERR-0015</code></td><td>処理開始前に停止し、ログへ記録</td></tr>
+              <tr><td>設定利用処理</td><td>環境変数、<code>system_settings</code> 必須キー、設定値範囲</td><td><code>ERR-0016</code> / <code>ERR-0017</code></td><td>API は 400/500、バッチは異常終了</td></tr>
+              <tr><td>Gmail 取込/送信</td><td>OAuth ファイル存在、token 有効性、対象ラベル存在</td><td><code>ERR-0018</code>〜<code>ERR-0022</code></td><td>再連携または設定見直しを促す</td></tr>
+              <tr><td>AI 要約/補助評価</td><td>API キー、プロバイダ、モデル名、対象データ有無、出力形式、AI 判定対象条件</td><td><code>ERR-0023</code>〜<code>ERR-0026</code></td><td>対象単位でエラー保存、全件不可なら処理停止</td></tr>
+              <tr><td>バッチ起動</td><td>同一バッチ実行中、依存サービス稼働、開始条件</td><td><code>ERR-0027</code> / <code>ERR-0028</code></td><td>多重起動はスキップ、それ以外は異常終了</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel backend-section">
+        <div class="panel-head"><h2>11. エラー処理・ログ</h2></div>
+        <ul>
+          <li>API は <code>{"error_code":"ERR-xxxx","error_message":"..."}</code> 形式でエラーを返す（バッチ手動実行 API は <code>log/batch.log</code> の直近 ERROR 行を参照）。</li>
+          <li>API はバリデーションエラーを 400、未存在を 404、競合を 409、外部連携失敗を 502、想定外を 500 として返す。</li>
+          <li>バッチはメール単位で失敗を分離し、1件の失敗で全体を停止しない。認証エラーなど全件継続不能な場合のみ異常終了する。</li>
+          <li>バッチログは <a href="../共通機能/index.html">ログ出力共通機能</a> に従い <code>log/batch.log</code> へ JSON Lines 形式で出力する（環境変数 <code>BATCH_LOG_PATH</code> で変更可）。画面にはログ本文を表示せず、エラーコードとメッセージのみ表示する。メール本文や OAuth token は出力しない。</li>
+          <li>障害箇所を特定できるよう、全ログに <code>function_id</code>、<code>module</code>、<code>method</code>、<code>operation</code> を含める。</li>
+          <li>再実行可能性を優先し、エラーコード、Gmail ID、DB ID、処理ステータスをログに含める。</li>
+        </ul>
+      </section>
+
+      <section class="panel backend-section">
+        <div class="panel-head"><h2>12. 設定値</h2></div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>キー</th><th>配置</th><th>用途</th></tr></thead>
+            <tbody>
+              <tr><td><code>DATABASE_URL</code></td><td><code>.env</code></td><td>PostgreSQL 接続文字列</td></tr>
+              <tr><td><code>CURSOR_API_KEY</code></td><td><code>.env</code></td><td>Cursor SDK 認証（BAT-002 優先）</td></tr>
+              <tr><td><code>OPENAI_API_KEY</code></td><td><code>.env</code></td><td>OpenAI API 認証（BAT-002 フォールバック）</td></tr>
+              <tr><td><code>AI_PROVIDER</code></td><td><code>.env</code> / <code>system_settings</code></td><td>利用する AI プロバイダ</td></tr>
+              <tr><td><code>AI_MODEL</code></td><td><code>.env</code> / <code>system_settings</code></td><td>要約・補助評価モデル</td></tr>
+              <tr><td><code>AI_ASSIST_ENABLED</code></td><td><code>system_settings</code></td><td>BAT-003 完了時に LLM 補助判定を自動実行するか</td></tr>
+              <tr><td><code>AI_JUDGEMENT_TOP_N</code></td><td><code>system_settings</code></td><td>AI 判定へ渡す案件ごとの上位人数</td></tr>
+              <tr><td><code>GMAIL_CREDENTIALS_PATH</code></td><td><code>.env</code></td><td>OAuth credentials JSON パス</td></tr>
+              <tr><td><code>GMAIL_TOKEN_PATH</code></td><td><code>.env</code></td><td>OAuth token JSON パス</td></tr>
+              <tr><td><code>GMAIL_SORT_SOURCE_LABEL</code></td><td><code>system_settings</code></td><td>振り分け対象 Gmail ラベル</td></tr>
+              <tr><td><code>GMAIL_SORT_LABEL_TALENT</code></td><td><code>system_settings</code></td><td>振り分け後の要員 Gmail ラベル</td></tr>
+              <tr><td><code>GMAIL_SORT_LABEL_PROJECT</code></td><td><code>system_settings</code></td><td>振り分け後の案件 Gmail ラベル</td></tr>
+              <tr><td><code>GMAIL_SORT_KEYWORDS_TALENT</code></td><td><code>system_settings</code></td><td>要員判定用検索ワード（改行区切り）</td></tr>
+              <tr><td><code>GMAIL_SORT_KEYWORDS_PROJECT</code></td><td><code>system_settings</code></td><td>案件判定用検索ワード（改行区切り）</td></tr>
+              <tr><td><code>GMAIL_SORT_UNKNOWN_LABEL</code></td><td><code>system_settings</code></td><td>判別不能時の Gmail ラベル</td></tr>
+              <tr><td><code>SORT_BODY_PREVIEW_CHARS</code></td><td><code>.env</code></td><td>振り分け判定に使う本文先頭文字数（既定 500）。件名優先で判定できない場合のみ使用</td></tr>
+              <tr><td><code>BATCH_LOG_PATH</code></td><td><code>.env</code></td><td>バッチ JSON ログの出力先（既定 <code>log/batch.log</code>）</td></tr>
+              <tr><td><code>INGEST_TIMES</code></td><td><code>system_settings</code></td><td>（参考）画面上の取込時刻表示。定期起動には未使用</td></tr>
+              <tr><td><code>ingest_data_retention_days</code></td><td><code>system_settings</code></td><td>保持日数を超えた取込データを削除（0=無効）。BAT-006 で参照</td></tr>
+              <tr><td><code>INGEST_DATA_RETENTION_DAYS</code></td><td><code>.env</code></td><td>保持日数のフォールバック</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel backend-section">
+        <div class="panel-head"><h2>13. 実装ディレクトリ</h2></div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>パス</th><th>内容</th></tr></thead>
+            <tbody>
+              <tr><td><code>api/app/main.py</code></td><td>FastAPI アプリ本体。<code>/health</code>, <code>/api/settings</code> 等。</td></tr>
+              <tr><td><code>api/app/routers/settings.py</code></td><td>設定 API。<code>ingest_data_retention_days</code> の取得・更新。</td></tr>
+              <tr><td><code>batch/app/main.py</code></td><td>バッチエントリポイント。ジョブ <code>sort</code>（BAT-001）, <code>ingest</code>（BAT-002）, <code>cleanup</code>（BAT-006）等。</td></tr>
+              <tr><td><code>batch/BAT-001/classifier.py</code></td><td>件名優先のキーワード判定ロジック。</td></tr>
+              <tr><td><code>batch/BAT-001/gmail_sort.py</code></td><td>メール振り分けバッチ本体。</td></tr>
+              <tr><td><code>batch/app/logging_util.py</code></td><td>バッチ構造化ログ（<code>log/batch.log</code>）。</td></tr>
+              <tr><td><code>api/app/routers/batches.py</code></td><td>手動バッチ API（<code>POST /api/batches/gmail-pipeline</code> 等）。</td></tr>
+              <tr><td><code>api/app/batch_runner.py</code></td><td>バッチ subprocess 起動と <code>log/batch.log</code> からのエラー読取。</td></tr>
+              <tr><td><code>batch/BAT-006/</code></td><td>過去データ削除バッチ実装（<code>cleanup.py</code>, <code>cleanup_db.py</code>）。</td></tr>
+              <tr><td><code>batch/app/config.py</code></td><td>バッチ側設定読込。Gmail ラベル・保持日数・OAuth ファイルパスを含む。</td></tr>
+              <tr><td><code>.docker/docker-compose.yml</code></td><td>db / api / web / batch の起動定義（バッチは手動 run）。</td></tr>
+              <tr><td><code>secrets/</code></td><td>Gmail OAuth 用 JSON。git 管理外。</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

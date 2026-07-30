@@ -1,0 +1,35 @@
+# Development overrides. Pass explicitly from the repo root:
+# docker compose -f .docker/docker-compose.yml -f .docker/docker-compose.override.yml up --build
+services:
+  api:
+    volumes:
+      - ../api/app:/app/app
+      - ../batch:/batch
+      - ../secrets:/secrets
+      - ../log:/app/log
+    environment:
+      BATCH_ROOT: /batch
+      BATCH_LOG_PATH: /app/log/batch.log
+    command:
+      [
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--reload",
+      ]
+
+  web:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ../web:/app
+      - web_node_modules:/app/node_modules
+    command: ["sh", "-c", "npm install && npm run dev"]
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+
+volumes:
+  web_node_modules:

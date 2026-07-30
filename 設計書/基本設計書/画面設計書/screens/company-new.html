@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SCR-007 企業追加 — 基本設計</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">MS</span><div><strong>MatchingService</strong><small>基本設計書</small></div></div>
+      <nav class="nav">
+        <a class="nav-item" href="../index.html">一覧</a>
+        <a class="nav-item" href="companies.html">企業一覧</a>
+        <a class="nav-item is-active" href="company-new.html">企業追加</a>
+      </nav>
+    </aside>
+    <main class="main main--bd">
+      <header class="topbar">
+        <div><h1>SCR-007 企業追加</h1><p class="muted">新規企業マスタと任意の主担当者を登録</p></div>
+        <div class="topbar-actions"><a class="btn btn-secondary" href="../../../システムイメージ/company-new.html">画面イメージ</a></div>
+      </header>
+      <div class="bd-meta"><span>画面ID: SCR-007</span><span>URL: /companies/new</span></div>
+
+      <section class="panel bd-section">
+        <h2>1. 画面概要</h2>
+        <p>企業マスタを新規登録する。企業情報に加え、任意で主担当者を同時登録できる。登録後は企業詳細画面へ遷移する。</p>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>2. 画面遷移</h2>
+        <table class="table flow-table">
+          <tbody>
+            <tr><td>遷移元</td><td>企業一覧の「企業を追加」</td></tr>
+            <tr><td>遷移先（成功）</td><td>企業詳細（新規 company_id）</td></tr>
+            <tr><td>遷移先（キャンセル）</td><td>企業一覧</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>3. 入力項目</h2>
+        <h3>企業情報（必須）</h3>
+        <table class="table">
+          <thead><tr><th>項目</th><th>必須</th><th>バリデーション</th><th>DB</th></tr></thead>
+          <tbody>
+            <tr><td>企業名</td><td>○</td><td>1〜255文字</td><td>companies.name</td></tr>
+            <tr><td>区分</td><td>○</td><td>introducer / distributor / both</td><td>companies.kind</td></tr>
+            <tr><td>メールドメイン</td><td>—</td><td>ドメイン形式</td><td>companies.domain</td></tr>
+            <tr><td>既定返信先</td><td>—</td><td>メール形式</td><td>companies.default_email</td></tr>
+            <tr><td>備考</td><td>—</td><td>—</td><td>companies.notes</td></tr>
+          </tbody>
+        </table>
+        <h3>主担当者（任意）</h3>
+        <table class="table">
+          <tbody>
+            <tr><td>氏名・メール・電話</td><td>contacts（role=primary）。メール入力時は氏名も必須</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>4. 処理仕様</h2>
+        <ol>
+          <li>バリデーション通過後 <code>POST /api/companies</code></li>
+          <li>companies に INSERT</li>
+          <li>主担当入力ありなら contacts に INSERT（company_id, role=primary）</li>
+          <li>成功時 企業詳細へリダイレクト</li>
+        </ol>
+      </section>
+
+      <section class="panel bd-section">
+        <h2>5. 参照 DB</h2>
+        <p>companies, contacts</p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

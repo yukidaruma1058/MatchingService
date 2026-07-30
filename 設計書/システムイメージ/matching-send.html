@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>案件への提案送信 — MatchingService</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">MS</span>
+        <div>
+          <strong>MatchingService</strong>
+          <small>システムイメージ</small>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="nav-item" href="index.html">ダッシュボード</a>
+        <a class="nav-item" href="talents.html">人材一覧</a>
+        <a class="nav-item" href="projects.html">案件一覧</a>
+        <a class="nav-item" href="companies.html">企業一覧</a>
+        <a class="nav-item" href="contacts.html">担当者一覧</a>
+        <a class="nav-item is-active" href="matching.html">マッチング</a>
+        <a class="nav-item" href="emails.html">メール取込</a>
+        <a class="nav-item" href="settings.html">設定</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1>案件への提案送信</h1>
+          <p class="muted">OK 要員を同一案件ごとにまとめて、案件配信メールへ 1 通で返信</p>
+        </div>
+        <div class="topbar-actions">
+          <a class="btn btn-secondary" href="matching.html">マッチングへ</a>
+          <a class="btn btn-primary" href="matching-send.html">選択して送信（イメージ）</a>
+        </div>
+      </header>
+
+      <p class="notice">
+        本文は BAT-009 の固定フォーマットで生成します。本画面では件名・本文の編集は行いません。
+      </p>
+
+      <section class="panel" style="margin-bottom:16px;">
+        <h2>送信内容</h2>
+        <div class="field">
+          <label for="project-select">案件</label>
+          <select id="project-select">
+            <option>P-2208 / 基幹刷新</option>
+            <option>P-2210 / EC フロント刷新</option>
+          </select>
+        </div>
+        <div class="table-wrap" style="margin-top:12px;">
+          <table class="table">
+            <thead>
+              <tr>
+                <th></th>
+                <th>人材</th>
+                <th>スコア</th>
+                <th>AI</th>
+                <th>理由</th>
+                <th>状態</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><input type="checkbox" checked /></td>
+                <td><a href="talent-detail.html">山田 太郎</a></td>
+                <td><span class="score-pill">94</span></td>
+                <td>88</td>
+                <td class="muted">スキル一致・単価帯内</td>
+                <td><span class="badge badge-ok">提案可</span></td>
+              </tr>
+              <tr>
+                <td><input type="checkbox" checked /></td>
+                <td><a href="talent-detail.html">高橋 健</a></td>
+                <td><span class="score-pill">91</span></td>
+                <td>85</td>
+                <td class="muted">Java/Kotlin 一致</td>
+                <td><span class="badge badge-ok">提案可</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="compose-card">
+        <h2>送信される本文（参考・編集不可）</h2>
+        <div class="stack">
+          <div class="field">
+            <label for="subject">件名</label>
+            <input id="subject" readonly value="Re: 【案件】基幹刷新のご紹介" />
+          </div>
+          <div class="field">
+            <label for="body">本文</label>
+            <textarea id="body" readonly style="min-height:280px;">ご担当者様
+
+お世話になっております。以下の要員をご提案いたします。
+
+■ 案件: 基幹刷新
+
+【1】山田 太郎
+  スキル: Java, Spring Boot, AWS
+  単価: 75万円
+  稼働: 即日
+  スコア: 94 / AI:88
+
+【2】高橋 健
+  スキル: Java, Kotlin
+  単価: 72万円
+  稼働: 来月
+  スコア: 91 / AI:85
+
+ご検討のほど、よろしくお願いいたします。
+</textarea>
+          </div>
+        </div>
+        <div class="chip-row">
+          <span class="chip">1通に複数名</span>
+          <span class="chip">BAT-009 固定本文</span>
+          <span class="chip">Gmail スレッド返信</span>
+        </div>
+        <div class="flow-links">
+          <a class="btn btn-primary" href="matching.html">送信してマッチングへ</a>
+          <a class="btn btn-secondary" href="matching.html">キャンセル</a>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

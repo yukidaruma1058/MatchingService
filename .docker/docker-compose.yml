@@ -1,0 +1,120 @@
+name: matching
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: matching-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-matching}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-matching}
+      POSTGRES_DB: ${POSTGRES_DB:-matching}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-matching} -d ${POSTGRES_DB:-matching}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ..
+      dockerfile: .docker/api/Dockerfile
+    image: matching-api:latest
+    container_name: matching-api
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://matching:matching@db:5432/matching}
+      # OPENAI_API_KEY / CURSOR_API_KEY は env_file のみから渡す。
+      # ここで ${OPENAI_API_KEY:-} と書くと、compose 補間が空のとき env_file の値を空文字で上書きする。
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      GMAIL_CREDENTIALS_PATH: ${GMAIL_CREDENTIALS_PATH:-/secrets/credentials.json}
+      GMAIL_TOKEN_PATH: ${GMAIL_TOKEN_PATH:-/secrets/token.json}
+      GMAIL_OAUTH_REDIRECT_URI: ${GMAIL_OAUTH_REDIRECT_URI:-}
+      WEB_SETTINGS_URL: ${WEB_SETTINGS_URL:-}
+      API_PUBLIC_BASE_URL: ${API_PUBLIC_BASE_URL:-}
+      WEB_PUBLIC_BASE_URL: ${WEB_PUBLIC_BASE_URL:-}
+      GMAIL_CLIENT_ID: ${GMAIL_CLIENT_ID:-}
+      GMAIL_CLIENT_SECRET: ${GMAIL_CLIENT_SECRET:-}
+      GMAIL_OAUTH_PROJECT_ID: ${GMAIL_OAUTH_PROJECT_ID:-matching-service}
+      BATCH_ROOT: /batch
+      BATCH_LOG_PATH: ${BATCH_LOG_PATH:-/app/log/batch.log}
+    volumes:
+      - ../secrets:/secrets
+      - ../log:/app/log
+      - ../batch:/batch:ro
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ..
+      dockerfile: .docker/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    image: matching-web:latest
+    container_name: matching-web
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+  batch:
+    build:
+      context: ..
+      dockerfile: .docker/batch/Dockerfile
+    image: matching-batch:latest
+    container_name: matching-batch
+    profiles: ["batch"]
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://matching:matching@db:5432/matching}
+      # OPENAI_API_KEY / CURSOR_API_KEY は env_file のみ（空の compose 補間で上書きしない）
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      BATCH_JOB: ${BATCH_JOB:-sort}
+      GMAIL_CREDENTIALS_PATH: ${GMAIL_CREDENTIALS_PATH:-/secrets/credentials.json}
+      GMAIL_TOKEN_PATH: ${GMAIL_TOKEN_PATH:-/secrets/token.json}
+      GMAIL_CLIENT_ID: ${GMAIL_CLIENT_ID:-}
+      GMAIL_CLIENT_SECRET: ${GMAIL_CLIENT_SECRET:-}
+      GMAIL_OAUTH_PROJECT_ID: ${GMAIL_OAUTH_PROJECT_ID:-matching-service}
+      API_PUBLIC_BASE_URL: ${API_PUBLIC_BASE_URL:-}
+      WEB_PUBLIC_BASE_URL: ${WEB_PUBLIC_BASE_URL:-}
+      GMAIL_OAUTH_REDIRECT_URI: ${GMAIL_OAUTH_REDIRECT_URI:-}
+      GMAIL_SORT_SOURCE_LABEL: ${GMAIL_SORT_SOURCE_LABEL:-SES未振り分け}
+      GMAIL_SORT_LABEL_TALENT: ${GMAIL_SORT_LABEL_TALENT:-SES人材紹介}
+      GMAIL_SORT_LABEL_PROJECT: ${GMAIL_SORT_LABEL_PROJECT:-SES案件配信}
+      GMAIL_SORT_UNKNOWN_LABEL: ${GMAIL_SORT_UNKNOWN_LABEL:-SES要確認}
+      GMAIL_SORT_KEYWORDS_TALENT: ${GMAIL_SORT_KEYWORDS_TALENT:-人材\n要員\nスキルシート\nご紹介}
+      GMAIL_SORT_KEYWORDS_PROJECT: ${GMAIL_SORT_KEYWORDS_PROJECT:-案件\n募集\n開発\nお問い合わせ}
+      GMAIL_LABEL_TALENT: ${GMAIL_LABEL_TALENT:-SES人材紹介}
+      GMAIL_LABEL_PROJECT: ${GMAIL_LABEL_PROJECT:-SES案件配信}
+      INGEST_DATA_RETENTION_DAYS: ${INGEST_DATA_RETENTION_DAYS:-0}
+      BATCH_LOG_PATH: ${BATCH_LOG_PATH:-/app/log/batch.log}
+    volumes:
+      - ../secrets:/secrets
+      - ../log:/app/log
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

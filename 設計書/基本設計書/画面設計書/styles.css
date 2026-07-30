@@ -1,0 +1,75 @@
+@import url("../../システムイメージ/styles.css");
+
+.main--bd {
+  max-width: 960px;
+}
+
+.bd-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.bd-meta span {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.bd-section {
+  margin-bottom: 24px;
+}
+
+.bd-section h2 {
+  margin: 0 0 10px;
+  font-size: 1.1rem;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.bd-section h3 {
+  margin: 14px 0 8px;
+  font-size: 0.95rem;
+}
+
+.bd-section p,
+.bd-section li {
+  line-height: 1.65;
+  color: var(--ink);
+}
+
+.bd-section ul {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.flow-table td:first-child {
+  white-space: nowrap;
+  width: 28%;
+  font-weight: 600;
+}
+
+.screen-index-table td code {
+  font-size: 0.85em;
+}
+
+.nav-group-label {
+  margin: 16px 0 6px;
+  padding: 0 12px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.bd-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
