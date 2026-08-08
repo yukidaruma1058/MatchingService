@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS matches (
 
 CREATE INDEX IF NOT EXISTS idx_matches_project_score ON matches (project_id, score DESC);
 CREATE INDEX IF NOT EXISTS idx_matches_talent_project ON matches (talent_id, project_id);
+CREATE INDEX IF NOT EXISTS idx_matches_project_talent ON matches (project_id, talent_id);
+CREATE INDEX IF NOT EXISTS idx_matches_pair_created ON matches (talent_id, project_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_matches_run ON matches (match_run_id);
 
 CREATE TABLE IF NOT EXISTS commute_cache (

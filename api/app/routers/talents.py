@@ -12,8 +12,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.batch_runner import BatchRunTimeoutError, read_last_batch_error, run_batch_job, start_batch_job
 from app.deps import get_db
 from app.entity_delete import delete_talent_cascade
+from app.manual_entity import create_manual_placeholder_email
+from app.match_run_query import latest_completed_match_run
 from app.models import Company, Email, Match, MatchRun, OutreachMessage, OutreachReply, Project, Talent, TalentSkillSheet
 from app.outreach_status import (
     ProposalSideStatus,
@@ -26,6 +29,7 @@ from app.outreach_status import (
 from app.schemas import TalentDetail, TalentListItem, TalentSkillSheetItem
 
 router = APIRouter(prefix="/api/talents", tags=["talents"])
+
 
 
 class TalentMatchItem(BaseModel):
@@ -84,6 +88,13 @@ class TalentUpdateRequest(BaseModel):
     summary: str | None = None
     proposal_cc_emails: list[str] | None = None
     status: str | None = Field(None, pattern="^(active|inactive)$")
+
+
+class TalentCreateRequest(BaseModel):
+    """画面からの人材登録（タイトル+本文 → AI要約）。"""
+
+    title: str = Field(..., min_length=1, max_length=255)
+    body: str = Field(..., min_length=1)
 
 
 @dataclass(frozen=True)
@@ -304,7 +315,7 @@ def _to_detail(session: Session, row: Talent) -> TalentDetail:
 
 @router.get("", response_model=list[TalentListItem])
 def list_talents(session: Session = Depends(get_db)) -> list[TalentListItem]:
-    rows = list(session.scalars(select(Talent).order_by(Talent.created_at.desc()).limit(200)).all())
+    rows = list(session.scalars(select(Talent).order_by(Talent.created_at.desc())).all())
     talent_ids = [row.id for row in rows]
     stats = _proposed_project_stats(session, talent_ids)
     sheets = _skill_sheet_presence(session, talent_ids)
@@ -323,6 +334,71 @@ def list_talents(session: Session = Depends(get_db)) -> list[TalentListItem]:
         )
         for row in rows
     ]
+
+
+@router.post("", response_model=TalentDetail, status_code=201)
+def create_talent(body: TalentCreateRequest, session: Session = Depends(get_db)) -> TalentDetail:
+    """タイトル+本文を AI 要約して人材登録する。ルール採点はバックグラウンドで実行する。"""
+    title = body.title.strip()
+    text = body.body.strip()
+    if not title:
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "ERR-0001", "error_message": "タイトルを入力してください。"},
+        )
+    if not text:
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "ERR-0001", "error_message": "本文を入力してください。"},
+        )
+
+    email = create_manual_placeholder_email(
+        session,
+        email_type="talent",
+        subject=title,
+        body_text=text,
+    )
+    email_id = email.id
+    session.commit()
+
+    try:
+        result = run_batch_job(
+            "manual_register",
+            timeout_seconds=600,
+            extra_env={"MANUAL_EMAIL_ID": str(email_id)},
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"error_code": "ERR-0030", "error_message": str(exc)},
+        ) from exc
+    except BatchRunTimeoutError as exc:
+        raise HTTPException(
+            status_code=504,
+            detail={"error_code": "ERR-0030", "error_message": "AI要約がタイムアウトしました。"},
+        ) from exc
+
+    if result.exit_code != 0:
+        error = read_last_batch_error(after_byte_offset=result.log_offset_before) or {
+            "error_code": "ERR-0030",
+            "error_message": "人材の AI 要約登録に失敗しました。",
+        }
+        raise HTTPException(status_code=500, detail=error)
+
+    row = session.scalar(select(Talent).where(Talent.email_id == email_id))
+    if row is None:
+        raise HTTPException(
+            status_code=500,
+            detail={"error_code": "ERR-0030", "error_message": "人材の登録結果が見つかりません。"},
+        )
+
+    try:
+        start_batch_job("match", extra_env={"MATCH_TALENT_IDS": str(row.id)})
+    except FileNotFoundError:
+        pass
+
+    session.refresh(row)
+    return _to_detail(session, row)
 
 
 @router.get("/{talent_id}", response_model=TalentDetail)
@@ -430,7 +506,7 @@ def list_talent_matches(talent_id: UUID, session: Session = Depends(get_db)) -> 
             detail={"error_code": "ERR-0012", "error_message": "対象データが見つかりません。"},
         )
 
-    latest_run = session.scalar(select(MatchRun).order_by(MatchRun.started_at.desc()).limit(1))
+    latest_run = latest_completed_match_run(session)
     if latest_run is None:
         return []
 

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, settings
 from app.db_bootstrap import create_session_factory, ensure_schema
+from app.email_core_body import collect_core_strip_names, ensure_email_core_body
 from app.email_db import load_all_settings
 from app.gmail_client import GmailClient, GmailConfigError
 from app.gmail_credentials import ensure_gmail_credentials_file
@@ -61,31 +62,47 @@ def _build_body(
     items: list[tuple[Project, Match]],
     template: str | None = None,
     rate_markdown_man_yen: int = 0,
+    own_company_name: str | None = None,
 ) -> str:
-    projects = [
-        ProjectProposeLine(
-            title=project.title,
-            required_skills=project.required_skills if isinstance(project.required_skills, list) else [],
-            rate_min=project.rate_min,
-            rate_max=project.rate_max,
-            work_style=project.work_style,
-            start_date=project.start_date,
-            score=match.score,
-            recommendation_points=resolve_recommendation_points(
-                stored=match.recommendation_points,
-                display_name=talent.display_name,
-                skills=talent.skills if isinstance(talent.skills, list) else [],
-                reason=match.reason,
-            ),
-            foreign_nationality_ng=project.foreign_nationality_ng,
-            commerce_flow_limit=project.commerce_flow_limit,
-            working_hours=project.working_hours,
-            settlement_range=project.settlement_range,
-            interview_count=project.interview_count,
-            summary=project.summary,
+    projects = []
+    for project, match in items:
+        project_email = session.get(Email, project.email_id)
+        # 送信時は再 LLM しない（preview でキャッシュ済み。無ければ平文化フォールバック）
+        core_body = ""
+        if project_email is not None:
+            extra = [own_company_name] if (own_company_name or "").strip() else None
+            core_body = ensure_email_core_body(
+                session,
+                project_email,
+                openai_api_key=settings.openai_api_key,
+                openai_model=settings.openai_model,
+                allow_llm=False,
+                strip_names=collect_core_strip_names(session, project_email, extra_names=extra),
+            )
+        projects.append(
+            ProjectProposeLine(
+                title=project.title,
+                required_skills=project.required_skills if isinstance(project.required_skills, list) else [],
+                rate_min=project.rate_min,
+                rate_max=project.rate_max,
+                work_style=project.work_style,
+                start_date=project.start_date,
+                score=match.score,
+                recommendation_points=resolve_recommendation_points(
+                    stored=match.recommendation_points,
+                    display_name=talent.display_name,
+                    skills=talent.skills if isinstance(talent.skills, list) else [],
+                    reason=match.reason,
+                ),
+                foreign_nationality_ng=project.foreign_nationality_ng,
+                commerce_flow_limit=project.commerce_flow_limit,
+                working_hours=project.working_hours,
+                settlement_range=project.settlement_range,
+                interview_count=project.interview_count,
+                summary=project.summary,
+                core_body=core_body or None,
+            )
         )
-        for project, match in items
-    ]
     company_name, contact_name = resolve_source_party(
         session,
         source_email,
@@ -198,18 +215,31 @@ def run_talent_propose_batch(
     body_by_match_id: dict[UUID, str] | None = None,
     to_address: str | None = None,
     cc_addresses: list[str] | None = None,
+    to_by_match_id: dict[UUID, str] | None = None,
+    cc_by_match_id: dict[UUID, list[str]] | None = None,
     cfg: Settings | None = None,
 ) -> TalentProposeStats:
-    """要員側への案件提案を送信する（手動・match_ids 必須）。同一人材は1通にまとめる。"""
+    """要員側への案件提案を送信する（手動・match_ids 必須）。同一人材は1通にまとめる。
+
+    複数人材へ送る場合は body_by_match_id / to_by_match_id / cc_by_match_id で
+    人材ごとの本文・宛先を指定する（各人材グループの先頭 match_id で解決）。
+    """
     cfg = cfg or settings
     logger = get_batch_logger()
     job_id = f"job_{uuid.uuid4().hex[:12]}"
     stats = TalentProposeStats()
-    # 旧形式（matchごと本文）は先頭の本文をまとめて1通に使う
     legacy_bodies = body_by_match_id or {}
+    to_overrides = to_by_match_id or {}
+    cc_overrides = cc_by_match_id or {}
     combined_body = (body_text or "").strip() or None
-    if combined_body is None and legacy_bodies:
-        # 複数キーがある場合も、同じ編集本文想定で最初の非空を採用
+    # 単一本文の後方互換: by_match が無く combined も無いときだけ legacy の先頭を共用
+    if (
+        combined_body is None
+        and legacy_bodies
+        and not to_overrides
+        and not cc_overrides
+        and len({str(v).strip() for v in legacy_bodies.values() if str(v).strip()}) <= 1
+    ):
         for value in legacy_bodies.values():
             text = (value or "").strip()
             if text:
@@ -243,6 +273,7 @@ def run_talent_propose_batch(
         rate_markdown = parse_talent_propose_rate_markup(
             settings_map.get(SETTING_KEY_TALENT_PROPOSE_RATE_MARKUP)
         )
+        own_company_name = str(settings_map.get("own_company_name") or "").strip() or None
         matches = list(session.scalars(select(Match).where(Match.id.in_(match_ids))).all())
         stats.scanned = len(matches)
         already = _already_sent_match_ids(session, [m.id for m in matches])
@@ -253,7 +284,7 @@ def run_talent_propose_batch(
             session.commit()
             return stats
 
-        # 人材ごとにまとめる（人材詳細は常に1人材、マッチング画面は複数人材になり得る）
+        # 人材ごとにまとめる（人材詳細は常に1人材、案件詳細は複数人材になり得る）
         by_talent: dict[UUID, list[Match]] = {}
         for match in targets:
             by_talent.setdefault(match.talent_id, []).append(match)
@@ -288,16 +319,35 @@ def run_talent_propose_batch(
             if not ok or not items:
                 continue
 
+            # 人材グループ内の match から上書きを探す
+            body_override: str | None = None
+            to_override: str | None = None
+            cc_override: list[str] | None = None
+            for match in talent_matches:
+                if body_override is None and match.id in legacy_bodies:
+                    text = (legacy_bodies.get(match.id) or "").strip()
+                    if text:
+                        body_override = text
+                if to_override is None and match.id in to_overrides:
+                    addr = (to_overrides.get(match.id) or "").strip()
+                    if addr:
+                        to_override = addr
+                if cc_override is None and match.id in cc_overrides:
+                    cc_override = list(cc_overrides[match.id])
+                if body_override and to_override is not None and cc_override is not None:
+                    break
+
             body = (
-                combined_body
-                if combined_body is not None
-                else _build_body(
+                body_override
+                or combined_body
+                or _build_body(
                     session,
                     talent=talent,
                     source_email=source_email,
                     items=project_pairs,
                     template=project_template,
                     rate_markdown_man_yen=rate_markdown,
+                    own_company_name=own_company_name,
                 )
             )
             try:
@@ -309,8 +359,8 @@ def run_talent_propose_batch(
                     items=items,
                     body_text=body,
                     cfg=cfg,
-                    to_address=to_address,
-                    cc_addresses=cc_addresses,
+                    to_address=to_override if to_override is not None else to_address,
+                    cc_addresses=cc_override if cc_override is not None else cc_addresses,
                 )
                 session.commit()
                 stats.sent += 1

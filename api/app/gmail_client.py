@@ -6,10 +6,13 @@ OAuth トークンの検証・プロフィール取得・ラベル付け替え�
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
+import httplib2
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
+from google_auth_httplib2 import AuthorizedHttp
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
@@ -19,6 +22,8 @@ GMAIL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.settings.basic",
     "https://www.googleapis.com/auth/drive",
 ]
+
+GMAIL_HTTP_TIMEOUT_SECONDS = 60
 
 
 class GmailConfigError(Exception):
@@ -38,6 +43,7 @@ class GmailClient:
         self.token_path = Path(token_path)
         self._service = None
         self._label_name_to_id: dict[str, str] = {}
+        self._api_lock = threading.RLock()
 
     def connect(self) -> None:
         """OAuth トークンで認証し、Gmail API サービスを初期化する。"""
@@ -54,7 +60,9 @@ class GmailClient:
             else:
                 raise GmailConfigError("ERR-0019", "Gmail token is invalid or expired")
 
-        self._service = build("gmail", "v1", credentials=creds, cache_discovery=False)
+        http = httplib2.Http(timeout=GMAIL_HTTP_TIMEOUT_SECONDS)
+        authed_http = AuthorizedHttp(creds, http=http)
+        self._service = build("gmail", "v1", http=authed_http, cache_discovery=False)
         self._refresh_label_map()
 
     @property
@@ -63,8 +71,12 @@ class GmailClient:
             raise RuntimeError("Gmail client is not connected")
         return self._service
 
+    def _execute(self, request):
+        with self._api_lock:
+            return request.execute()
+
     def _refresh_label_map(self) -> None:
-        response = self.service.users().labels().list(userId="me").execute()
+        response = self._execute(self.service.users().labels().list(userId="me"))
         self._label_name_to_id = {
             label["name"]: label["id"]
             for label in response.get("labels", [])
@@ -93,7 +105,7 @@ class GmailClient:
         page_token = None
         while True:
             try:
-                response = (
+                response = self._execute(
                     self.service.users()
                     .messages()
                     .list(
@@ -102,7 +114,6 @@ class GmailClient:
                         pageToken=page_token,
                         maxResults=min(100, max(1, max_count - count)),
                     )
-                    .execute()
                 )
             except HttpError as exc:
                 raise GmailConfigError(
@@ -128,17 +139,19 @@ class GmailClient:
         add_ids = [self.label_id(name) for name in add_label_names]
         remove_ids = [self.label_id(name) for name in remove_label_names]
         try:
-            self.service.users().messages().modify(
-                userId="me",
-                id=message_id,
-                body={"addLabelIds": add_ids, "removeLabelIds": remove_ids},
-            ).execute()
+            self._execute(
+                self.service.users().messages().modify(
+                    userId="me",
+                    id=message_id,
+                    body={"addLabelIds": add_ids, "removeLabelIds": remove_ids},
+                )
+            )
         except HttpError as exc:
             raise GmailConfigError("ERR-0021", f"Failed to modify Gmail labels: {message_id}") from exc
 
     def get_profile(self) -> dict:
         """連携中 Gmail アカウントのプロフィールを取得する。"""
         try:
-            return self.service.users().getProfile(userId="me").execute()
+            return self._execute(self.service.users().getProfile(userId="me"))
         except HttpError as exc:
             raise GmailConfigError("ERR-0021", "Failed to fetch Gmail profile") from exc

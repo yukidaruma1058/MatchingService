@@ -19,10 +19,11 @@ from dataclasses import dataclass
 from classifier import classify_email, parse_keywords
 from db import SortSettings, load_all_settings, load_sort_settings, upsert_sorted_email
 
+from app.ai_concurrency import map_parallel, resolve_ai_concurrency
 from app.config import Settings, settings
 from app.gmail_credentials import ensure_gmail_credentials_file
 from app.db_bootstrap import create_session_factory, ensure_schema
-from app.gmail_client import GmailClient, GmailConfigError
+from app.gmail_client import GmailClient, GmailConfigError, GmailMessage
 from app.label_settings import load_ingest_settings, load_sort_settings
 from app.logging_util import get_batch_logger, log_error_event, log_event
 from app.proposal_cc import resolve_proposal_cc
@@ -47,6 +48,7 @@ class GmailSortBatch:
         self.cfg = cfg or settings
         self.logger = get_batch_logger()
         self.job_id = f"job_{uuid.uuid4().hex[:12]}"
+        self.fetch_concurrency = resolve_ai_concurrency(getattr(self.cfg, "ai_concurrency", 3))
 
     def run(self) -> SortBatchStats:
         """振り分けバッチを 1 回実行する。"""
@@ -182,24 +184,40 @@ class GmailSortBatch:
             },
         )
 
-        # --- メールごとの振り分け処理 ---
-        for message_id in message_ids:
+        # --- メールごとの振り分け処理（fetch は軽度並列、以降は直列） ---
+        fetch_results = map_parallel(
+            message_ids,
+            lambda message_id: self._fetch_one(client, message_id),
+            concurrency=self.fetch_concurrency,
+        )
+        for message_id, message, fetch_error in fetch_results:
             stats.scanned += 1
-            try:
-                message = client.fetch_message(message_id)
-            except GmailConfigError as exc:
+            if fetch_error is not None:
                 stats.failed += 1
-                log_error_event(
-                    self.logger,
-                    event="gmail_sort.message_failed",
-                    error_code=exc.error_code,
-                    detail=exc.message,
-                    operation="Gmail本文取得",
-                    method_name="fetch_message",
-                    job_id=self.job_id,
-                    gmail_message_id=message_id,
-                )
+                if isinstance(fetch_error, GmailConfigError):
+                    log_error_event(
+                        self.logger,
+                        event="gmail_sort.message_failed",
+                        error_code=fetch_error.error_code,
+                        detail=fetch_error.message,
+                        operation="Gmail本文取得",
+                        method_name="fetch_message",
+                        job_id=self.job_id,
+                        gmail_message_id=message_id,
+                    )
+                else:
+                    log_error_event(
+                        self.logger,
+                        event="gmail_sort.message_failed",
+                        error_code="ERR-0030",
+                        detail=str(fetch_error),
+                        operation="Gmail本文取得",
+                        method_name="fetch_message",
+                        job_id=self.job_id,
+                        gmail_message_id=message_id,
+                    )
                 continue
+            assert message is not None
 
             # 振り分け先ラベルが既に付いているメールはスキップ
             if client.has_any_label(message.label_ids, destination_labels):
@@ -299,6 +317,16 @@ class GmailSortBatch:
             },
         )
         return stats
+
+    def _fetch_one(
+        self,
+        client: GmailClient,
+        message_id: str,
+    ) -> tuple[str, GmailMessage | None, BaseException | None]:
+        try:
+            return message_id, client.fetch_message(message_id), None
+        except BaseException as exc:  # noqa: BLE001
+            return message_id, None, exc
 
 
 def run_sort_batch(cfg: Settings | None = None) -> SortBatchStats:

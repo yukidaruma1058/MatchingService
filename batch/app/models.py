@@ -33,6 +33,8 @@ class Email(Base):
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     body_text: Mapped[str | None] = mapped_column(Text)
     body_html: Mapped[str | None] = mapped_column(Text)
+    # 案件紹介下書き用: ヘッダー/フッター除去後のコア原文（LLM 抽出・キャッシュ）
+    body_core_text: Mapped[str | None] = mapped_column(Text)
     email_type: Mapped[str] = mapped_column(String(16), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
     source_company_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))

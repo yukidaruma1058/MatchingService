@@ -8,14 +8,16 @@ from __future__ import annotations
 
 import base64
 import re
+import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import httplib2
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
+from google_auth_httplib2 import AuthorizedHttp
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
@@ -26,6 +28,9 @@ GMAIL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.settings.basic",
     "https://www.googleapis.com/auth/drive",
 ]
+
+# Gmail API HTTP のソケットタイムアウト（無限ハング防止）
+GMAIL_HTTP_TIMEOUT_SECONDS = 60
 
 
 class GmailConfigError(Exception):
@@ -65,6 +70,8 @@ class GmailClient:
         self.token_path = Path(token_path)
         self._service = None
         self._label_name_to_id: dict[str, str] = {}
+        # httplib2 / googleapiclient はスレッドセーフではないため、並列 fetch 時は直列化する
+        self._api_lock = threading.RLock()
 
     def connect(self) -> None:
         """OAuth トークンで認証し、Gmail API サービスを初期化する。
@@ -84,7 +91,9 @@ class GmailClient:
             else:
                 raise GmailConfigError("ERR-0019", "Gmail token is invalid or expired")
 
-        self._service = build("gmail", "v1", credentials=creds, cache_discovery=False)
+        http = httplib2.Http(timeout=GMAIL_HTTP_TIMEOUT_SECONDS)
+        authed_http = AuthorizedHttp(creds, http=http)
+        self._service = build("gmail", "v1", http=authed_http, cache_discovery=False)
         self._refresh_label_map()
 
     @property
@@ -93,9 +102,14 @@ class GmailClient:
             raise RuntimeError("Gmail client is not connected")
         return self._service
 
+    def _execute(self, request: Any) -> Any:
+        """API リクエストをロック付きで実行する（並列ハング・競合防止）。"""
+        with self._api_lock:
+            return request.execute()
+
     def _refresh_label_map(self) -> None:
         """ユーザー定義ラベルの「名前 → Gmail 内部 ID」マップを構築する。"""
-        response = self.service.users().labels().list(userId="me").execute()
+        response = self._execute(self.service.users().labels().list(userId="me"))
         self._label_name_to_id = {
             label["name"]: label["id"]
             for label in response.get("labels", [])
@@ -132,7 +146,7 @@ class GmailClient:
         page_token = None
         while True:
             try:
-                response = (
+                response = self._execute(
                     self.service.users()
                     .messages()
                     .list(
@@ -141,7 +155,6 @@ class GmailClient:
                         pageToken=page_token,
                         maxResults=min(max_results - len(message_ids), 100),
                     )
-                    .execute()
                 )
             except HttpError as exc:
                 raise GmailConfigError("ERR-0021", "Failed to list Gmail messages") from exc
@@ -159,7 +172,9 @@ class GmailClient:
     def fetch_message(self, message_id: str) -> GmailMessage:
         """メール 1 件のヘッダー・本文を取得し GmailMessage として返す。"""
         try:
-            raw = self.service.users().messages().get(userId="me", id=message_id, format="full").execute()
+            raw = self._execute(
+                self.service.users().messages().get(userId="me", id=message_id, format="full")
+            )
         except HttpError as exc:
             raise GmailConfigError("ERR-0021", f"Failed to fetch Gmail message: {message_id}") from exc
 
@@ -205,11 +220,13 @@ class GmailClient:
         if not add_ids and not remove_ids:
             return
         try:
-            self.service.users().messages().modify(
-                userId="me",
-                id=message_id,
-                body={"addLabelIds": add_ids, "removeLabelIds": remove_ids},
-            ).execute()
+            self._execute(
+                self.service.users().messages().modify(
+                    userId="me",
+                    id=message_id,
+                    body={"addLabelIds": add_ids, "removeLabelIds": remove_ids},
+                )
+            )
         except HttpError as exc:
             raise GmailConfigError("ERR-0021", f"Failed to modify Gmail labels: {message_id}") from exc
 
@@ -224,7 +241,7 @@ class GmailClient:
         if existing:
             return existing
         try:
-            created = (
+            created = self._execute(
                 self.service.users()
                 .labels()
                 .create(
@@ -235,7 +252,6 @@ class GmailClient:
                         "messageListVisibility": "show",
                     },
                 )
-                .execute()
             )
         except HttpError as exc:
             raise GmailConfigError("ERR-0020", f"Failed to create Gmail label: {label_name}") from exc
@@ -246,7 +262,9 @@ class GmailClient:
     def list_thread_message_ids(self, thread_id: str) -> list[str]:
         """スレッド内のメッセージ ID 一覧（古い順）。"""
         try:
-            raw = self.service.users().threads().get(userId="me", id=thread_id, format="minimal").execute()
+            raw = self._execute(
+                self.service.users().threads().get(userId="me", id=thread_id, format="minimal")
+            )
         except HttpError as exc:
             raise GmailConfigError("ERR-0021", f"Failed to fetch Gmail thread: {thread_id}") from exc
         messages = raw.get("messages", []) or []
@@ -256,7 +274,7 @@ class GmailClient:
         """指定ヘッダー名の値を小文字キーで返す。"""
         wanted = {name.lower() for name in header_names}
         try:
-            raw = (
+            raw = self._execute(
                 self.service.users()
                 .messages()
                 .get(
@@ -265,7 +283,6 @@ class GmailClient:
                     format="metadata",
                     metadataHeaders=list(header_names),
                 )
-                .execute()
             )
         except HttpError as exc:
             raise GmailConfigError("ERR-0021", f"Failed to fetch Gmail headers: {message_id}") from exc
@@ -304,7 +321,7 @@ class GmailClient:
     def get_authenticated_email(self) -> str | None:
         """連携中 Gmail アカウントのメールアドレス。"""
         try:
-            profile = self.service.users().getProfile(userId="me").execute()
+            profile = self._execute(self.service.users().getProfile(userId="me"))
         except HttpError:
             return None
         email = str(profile.get("emailAddress") or "").strip()
@@ -317,7 +334,7 @@ class GmailClient:
         if primary:
             emails.append(primary)
         try:
-            result = self.service.users().settings().sendAs().list(userId="me").execute()
+            result = self._execute(self.service.users().settings().sendAs().list(userId="me"))
         except HttpError:
             return emails
         for item in result.get("sendAs", []) or []:
@@ -408,7 +425,7 @@ class GmailClient:
         raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
         body: dict[str, Any] = {"raw": raw, "threadId": thread_id}
         try:
-            sent = self.service.users().messages().send(userId="me", body=body).execute()
+            sent = self._execute(self.service.users().messages().send(userId="me", body=body))
         except HttpError as exc:
             raise GmailConfigError("ERR-0022", f"Failed to send Gmail reply in thread: {thread_id}") from exc
         message_id = sent.get("id")

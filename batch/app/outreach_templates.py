@@ -8,7 +8,7 @@
   {{contact_name}}    担当者名
   {{project_title}}   対象案件名（人材提案）
   {{items}}           案件一覧 / 要員一覧ブロック
-                      （AI 採点時に保存したおすすめポイントを各 Item に付与）
+                      （案件提案: 各案件メールのコア原文。人材提案: 要員一覧＋おすすめポイント）
 """
 
 from __future__ import annotations
@@ -59,6 +59,8 @@ class ProjectProposeLine:
     settlement_range: str | None = None
     interview_count: int | None = None
     summary: str | None = None
+    # 案件取込メールのコア原文（設定時は構造化フィールドの代わりにこれを {{items}} へ載せる）
+    core_body: str | None = None
 
 
 @dataclass(frozen=True)
@@ -161,6 +163,11 @@ def format_project_items(
     lines: list[str] = []
     for idx, project in enumerate(projects, start=1):
         title = (project.title or "").strip() or f"案件{idx}"
+        core = (project.core_body or "").strip()
+        if core:
+            block = [f"【{idx}】{title}", "", core, ""]
+            lines.extend(block)
+            continue
         block = [f"【{idx}】{title}"]
         _append_field(block, "必須スキル", _join_skills(project.required_skills, limit=12))
         _append_field(

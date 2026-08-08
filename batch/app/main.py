@@ -4,6 +4,7 @@
 ジョブ名とバッチ ID の対応:
   - ``sort`` → BAT-001（メール振り分け）
   - ``ingest`` → BAT-002（メール取込・要約）
+  - ``manual_register`` → BAT-002（画面のタイトル+本文から AI 要約登録。MANUAL_EMAIL_ID 必須）
   - ``pipeline`` → BAT-001 → BAT-002 → BAT-006 → BAT-003 →（設定ONなら BAT-004）→ BAT-008
     （振り分け・取込・採点・任意でAI判定・返信同期）
   - ``cleanup`` → BAT-006（取込データ削除）
@@ -79,6 +80,7 @@ from app.logging_util import configure_logging, get_batch_logger, log_error_even
 _JOB_CHOICES = [
     "sort",
     "ingest",
+    "manual_register",
     "pipeline",
     "cleanup",
     "match",
@@ -205,6 +207,48 @@ def run(job: str, *, match_trigger: str = "manual") -> int:
             )
             return 1
         return 0 if stats.failed == 0 or stats.ingested > 0 else 1
+
+    if job == "manual_register":
+        try:
+            run_manual_register_batch = _load_batch_callable(
+                "BAT-002",
+                "manual_register",
+                "run_manual_register_batch",
+                clear_modules=("db", "summarizer", "manual_register", "gmail_ingest"),
+            )
+            result = run_manual_register_batch()
+            log_event(
+                logger,
+                logging.INFO,
+                event="batch.run.finished",
+                message="Batch job finished: manual_register",
+                operation="バッチジョブ完了",
+                method_name="run",
+                job_id="run",
+                function_id="BATCH",
+                module_name="app.main",
+                extra={
+                    "job": job,
+                    "ok": result.ok,
+                    "email_id": str(result.email_id),
+                    "entity_id": str(result.entity_id) if result.entity_id else None,
+                    "email_status": result.email_status,
+                },
+            )
+        except Exception as exc:
+            log_error_event(
+                logger,
+                event="batch.job.failed",
+                error_code="ERR-0030",
+                detail=str(exc),
+                operation="手動登録",
+                method_name="run",
+                job_id="unknown",
+                function_id="BAT-002",
+                module_name="BAT-002.manual_register",
+            )
+            return 1
+        return 0 if result.ok else 1
 
     if job == "pipeline":
         # 基本セット: BAT-001 → BAT-002 → BAT-006 → BAT-003 →（任意 BAT-004）→ BAT-008
@@ -339,6 +383,8 @@ def run(job: str, *, match_trigger: str = "manual") -> int:
                 extra={
                     "job": job,
                     "match_count": stats.match_count,
+                    "scored_count": getattr(stats, "scored_count", None),
+                    "reused_count": getattr(stats, "reused_count", None),
                     "talent_count": stats.talent_count,
                     "project_count": stats.project_count,
                 },
@@ -376,6 +422,8 @@ def run(job: str, *, match_trigger: str = "manual") -> int:
             body_text: str | None = None
             to_address: str | None = None
             cc_addresses: list[str] | None = None
+            to_by_match_id: dict[UUID, str] | None = None
+            cc_by_match_id: dict[UUID, list[str]] | None = None
             import json
             from pathlib import Path
 
@@ -403,13 +451,41 @@ def run(job: str, *, match_trigger: str = "manual") -> int:
             if raw is not None:
                 if not isinstance(raw, dict):
                     raise ValueError("OUTREACH_BODIES_JSON/FILE must contain a JSON object")
-                if "body" in raw and isinstance(raw.get("body"), str) and raw["body"].strip():
+                by_match_raw = raw.get("by_match_id")
+                if isinstance(by_match_raw, dict) and by_match_raw:
+                    body_by_match_id = {}
+                    to_by_match_id = {}
+                    cc_by_match_id = {}
+                    for key, value in by_match_raw.items():
+                        mid = UUID(str(key))
+                        if isinstance(value, dict):
+                            body_val = value.get("body")
+                            if isinstance(body_val, str) and body_val.strip():
+                                body_by_match_id[mid] = body_val
+                            to_val = value.get("to_address")
+                            if isinstance(to_val, str) and to_val.strip():
+                                to_by_match_id[mid] = to_val.strip()
+                            cc_val = value.get("cc_addresses")
+                            if isinstance(cc_val, list):
+                                cc_by_match_id[mid] = [
+                                    str(addr).strip() for addr in cc_val if str(addr).strip()
+                                ]
+                        elif isinstance(value, str) and value.strip():
+                            body_by_match_id[mid] = value
+                    if not body_by_match_id:
+                        body_by_match_id = None
+                    if not to_by_match_id:
+                        to_by_match_id = None
+                    if not cc_by_match_id:
+                        cc_by_match_id = None
+                elif "body" in raw and isinstance(raw.get("body"), str) and raw["body"].strip():
                     body_text = str(raw["body"])
                 else:
                     body_by_match_id = {
                         UUID(str(key)): str(value)
                         for key, value in raw.items()
-                        if str(key) not in {"body", "to_address", "cc_addresses"}
+                        if str(key) not in {"body", "to_address", "cc_addresses", "by_match_id"}
+                        and isinstance(value, str)
                     }
                 if isinstance(raw.get("to_address"), str) and str(raw["to_address"]).strip():
                     to_address = str(raw["to_address"]).strip()
@@ -424,6 +500,8 @@ def run(job: str, *, match_trigger: str = "manual") -> int:
                     body_by_match_id=body_by_match_id,
                     to_address=to_address,
                     cc_addresses=cc_addresses,
+                    to_by_match_id=to_by_match_id,
+                    cc_by_match_id=cc_by_match_id,
                 )
             finally:
                 if pending_used:
@@ -442,6 +520,12 @@ def run(job: str, *, match_trigger: str = "manual") -> int:
                 function_id="BATCH",
                 module_name="app.main",
                 extra={"job": job, "sent": stats.sent, "skipped": stats.skipped, "failed": stats.failed},
+            )
+            print(
+                json.dumps(
+                    {"sent": stats.sent, "skipped": stats.skipped, "failed": stats.failed},
+                    ensure_ascii=False,
+                )
             )
         except Exception as exc:
             log_error_event(

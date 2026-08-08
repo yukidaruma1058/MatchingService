@@ -72,6 +72,11 @@ services:
       - ../.env
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      # サーバー側プロキシは Docker 内部 DNS で API に到達する（ブラウザ向け localhost とは別）
+      API_INTERNAL_URL: ${API_INTERNAL_URL:-http://api:8000}
+    volumes:
+      # デバッグ NDJSON / 共有ログ（ホストの log/）
+      - ../log:/app/log
     ports:
       - "3000:3000"
     depends_on:

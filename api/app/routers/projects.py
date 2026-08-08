@@ -12,8 +12,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.batch_runner import BatchRunTimeoutError, read_last_batch_error, run_batch_job, start_batch_job
 from app.deps import get_db
 from app.entity_delete import delete_project_cascade
+from app.manual_entity import create_manual_placeholder_email
+from app.match_run_query import latest_completed_match_run
 from app.models import (
     Company,
     Email,
@@ -44,6 +47,8 @@ class ProjectMatchItem(BaseModel):
     match_run_id: str
     talent_id: str
     display_name: str | None = None
+    affiliation: str | None = None
+    summary: str | None = None
     source_company_name: str | None = None
     introducer_company_id: str | None = None
     skills: list[str] = []
@@ -91,6 +96,13 @@ class ProjectUpdateRequest(BaseModel):
     summary: str | None = None
     proposal_cc_emails: list[str] | None = None
     status: str | None = Field(None, pattern="^(open|closed)$")
+
+
+class ProjectCreateRequest(BaseModel):
+    """画面からの案件登録（タイトル+本文 → AI要約）。"""
+
+    title: str = Field(..., min_length=1, max_length=255)
+    body: str = Field(..., min_length=1)
 
 
 @dataclass(frozen=True)
@@ -275,7 +287,7 @@ def _to_detail(session: Session, row: Project) -> ProjectDetail:
 
 @router.get("", response_model=list[ProjectListItem])
 def list_projects(session: Session = Depends(get_db)) -> list[ProjectListItem]:
-    rows = list(session.scalars(select(Project).order_by(Project.created_at.desc()).limit(200)).all())
+    rows = list(session.scalars(select(Project).order_by(Project.created_at.desc())).all())
     stats = _proposed_talent_stats(session, [row.id for row in rows])
     company_names = _company_names_by_id(
         session,
@@ -293,6 +305,71 @@ def list_projects(session: Session = Depends(get_db)) -> list[ProjectListItem]:
         )
         for row in rows
     ]
+
+
+@router.post("", response_model=ProjectDetail, status_code=201)
+def create_project(body: ProjectCreateRequest, session: Session = Depends(get_db)) -> ProjectDetail:
+    """タイトル+本文を AI 要約して案件登録する。ルール採点はバックグラウンドで実行する。"""
+    title = body.title.strip()
+    text = body.body.strip()
+    if not title:
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "ERR-0001", "error_message": "タイトルを入力してください。"},
+        )
+    if not text:
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "ERR-0001", "error_message": "本文を入力してください。"},
+        )
+
+    email = create_manual_placeholder_email(
+        session,
+        email_type="project",
+        subject=title,
+        body_text=text,
+    )
+    email_id = email.id
+    session.commit()
+
+    try:
+        result = run_batch_job(
+            "manual_register",
+            timeout_seconds=600,
+            extra_env={"MANUAL_EMAIL_ID": str(email_id)},
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"error_code": "ERR-0030", "error_message": str(exc)},
+        ) from exc
+    except BatchRunTimeoutError as exc:
+        raise HTTPException(
+            status_code=504,
+            detail={"error_code": "ERR-0030", "error_message": "AI要約がタイムアウトしました。"},
+        ) from exc
+
+    if result.exit_code != 0:
+        error = read_last_batch_error(after_byte_offset=result.log_offset_before) or {
+            "error_code": "ERR-0030",
+            "error_message": "案件の AI 要約登録に失敗しました。",
+        }
+        raise HTTPException(status_code=500, detail=error)
+
+    row = session.scalar(select(Project).where(Project.email_id == email_id))
+    if row is None:
+        raise HTTPException(
+            status_code=500,
+            detail={"error_code": "ERR-0030", "error_message": "案件の登録結果が見つかりません。"},
+        )
+
+    try:
+        start_batch_job("match", extra_env={"MATCH_PROJECT_IDS": str(row.id)})
+    except FileNotFoundError:
+        pass
+
+    session.refresh(row)
+    return _to_detail(session, row)
 
 
 @router.get("/{project_id}", response_model=ProjectDetail)
@@ -424,7 +501,7 @@ def list_project_matches(project_id: UUID, session: Session = Depends(get_db)) -
             detail={"error_code": "ERR-0012", "error_message": "対象データが見つかりません。"},
         )
 
-    latest_run = session.scalar(select(MatchRun).order_by(MatchRun.started_at.desc()).limit(1))
+    latest_run = latest_completed_match_run(session)
     if latest_run is None:
         return []
 
@@ -507,6 +584,8 @@ def list_project_matches(project_id: UUID, session: Session = Depends(get_db)) -
                 match_run_id=str(match.match_run_id),
                 talent_id=str(match.talent_id),
                 display_name=talent.display_name if talent else None,
+                affiliation=talent.affiliation if talent else None,
+                summary=talent.summary if talent else None,
                 source_company_name=source_company,
                 introducer_company_id=str(introducer_id) if introducer_id else None,
                 skills=[str(s) for s in skills],

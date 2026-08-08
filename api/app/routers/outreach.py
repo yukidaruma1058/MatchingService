@@ -15,9 +15,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.batch_runner import BatchRunTimeoutError, read_last_batch_error, run_batch_job
+from app.config import settings
 from app.constraint_rules import resolve_proposal_commerce_flow
 from app.db import load_settings
 from app.deps import get_db
+from app.email_core_body import collect_core_strip_names, ensure_email_core_body
 from app.models import (
     Company,
     Email,
@@ -66,9 +68,10 @@ def _talent_company_name(session: Session, talent: Talent) -> str | None:
 
 
 class TalentProposeDraftInput(BaseModel):
-    """本文は1通分。match_id は後方互換のため残す（未使用可）。"""
+    """人材ごとの下書き。match_ids があればそれを優先、なければ match_id。"""
 
     match_id: str | None = None
+    match_ids: list[str] | None = None
     body_text: str
     to_address: str | None = None
     cc_addresses: list[str] | None = None
@@ -92,11 +95,14 @@ class TalentProposeDraft(BaseModel):
     project_id: str
     project_titles: list[str]
     project_title: str | None = None
+    talent_id: str | None = None
+    talent_name: str | None = None
     to_address: str | None = None
     cc_addresses: list[str] = Field(default_factory=list)
     subject: str
     body_text: str
     already_sent: bool = False
+    warning: str | None = None
 
 
 class TalentProposePreviewResponse(BaseModel):
@@ -254,8 +260,8 @@ def _parse_uuid(value: str, field_name: str) -> UUID:
         ) from exc
 
 
-def _raise_batch_error(*, fallback_message: str) -> None:
-    error = read_last_batch_error()
+def _raise_batch_error(*, fallback_message: str, after_byte_offset: int | None = None) -> None:
+    error = read_last_batch_error(after_byte_offset=after_byte_offset)
     if error:
         raise HTTPException(status_code=500, detail=error)
     raise HTTPException(
@@ -284,70 +290,28 @@ def _reply_subject(source_subject: str | None, project_title: str | None) -> str
     return f"Re: {subject}"
 
 
-@router.post("/talent-propose/preview", response_model=TalentProposePreviewResponse)
-def talent_propose_preview(
-    body: TalentProposePreviewRequest,
-    session: Session = Depends(get_db),
-) -> TalentProposePreviewResponse:
-    if not body.match_ids:
-        raise HTTPException(
-            status_code=400,
-            detail={"error_code": "ERR-0001", "error_message": "match_ids が空です。"},
-        )
-    ids = [_parse_uuid(mid, "match_id") for mid in body.match_ids]
-    matches = list(session.scalars(select(Match).where(Match.id.in_(ids))).all())
-    by_id = {m.id: m for m in matches}
-    missing = [str(i) for i in ids if i not in by_id]
-    if missing:
-        raise HTTPException(
-            status_code=404,
-            detail={"error_code": "ERR-0012", "error_message": "対象のマッチが見つかりません。"},
-        )
+def _manual_email_warning(source_email: Email | None) -> str | None:
+    if source_email is None:
+        return "取込元メールが無いため送信できません。"
+    gmail_id = (source_email.gmail_message_id or "").strip()
+    if gmail_id.startswith("manual-") or not source_email.thread_id or not gmail_id:
+        return "手動登録の人材のため Gmail 返信送信はできません。"
+    return None
 
-    ordered = [by_id[i] for i in ids]
-    talent_ids = {m.talent_id for m in ordered}
-    if len(talent_ids) != 1:
-        raise HTTPException(
-            status_code=400,
-            detail={"error_code": "ERR-0001", "error_message": "案件提案プレビューは同一人材のマッチのみ指定できます。"},
-        )
 
-    already = _already_sent_match_ids(session, ids)
-    pending = [m for m in ordered if m.id not in already]
-    if not pending:
-        first = ordered[0]
-        talent = session.get(Talent, first.talent_id)
-        project = session.get(Project, first.project_id)
-        source_email = session.get(Email, talent.email_id) if talent else None
-        return TalentProposePreviewResponse(
-            drafts=[
-                TalentProposeDraft(
-                    match_ids=[str(m.id) for m in ordered],
-                    match_id=str(first.id),
-                    project_ids=[str(m.project_id) for m in ordered],
-                    project_id=str(first.project_id),
-                    project_titles=[(session.get(Project, m.project_id).title if session.get(Project, m.project_id) else None) or "" for m in ordered],
-                    project_title=project.title if project else None,
-                    to_address=source_email.from_address if source_email else None,
-                    cc_addresses=_proposal_cc_list(talent),
-                    subject=_reply_subject(source_email.subject if source_email else None, project.title if project else None),
-                    body_text="",
-                    already_sent=True,
-                )
-            ]
-        )
-
-    talent = session.get(Talent, pending[0].talent_id)
-    if talent is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"error_code": "ERR-0012", "error_message": "人材が見つかりません。"},
-        )
+def _build_talent_propose_draft_for_talent(
+    session: Session,
+    *,
+    talent: Talent,
+    talent_matches: list[Match],
+    settings_map: dict,
+    already_sent: bool,
+) -> TalentProposeDraft:
     source_email = session.get(Email, talent.email_id)
     project_lines: list[TalentProposalProjectLine] = []
     project_ids: list[str] = []
     project_titles: list[str] = []
-    for match in pending:
+    for match in talent_matches:
         project = session.get(Project, match.project_id)
         if project is None:
             raise HTTPException(
@@ -356,6 +320,25 @@ def talent_propose_preview(
             )
         project_ids.append(str(project.id))
         project_titles.append(project.title or "")
+        if already_sent:
+            continue
+        project_email = session.get(Email, project.email_id)
+        core_body = ""
+        if project_email is not None:
+            # 下書き作成時に LLM 抽出し emails.body_core_text へキャッシュ
+            own_company = str(settings_map.get(SETTING_KEY_OWN_COMPANY_NAME) or "").strip()
+            core_body = ensure_email_core_body(
+                session,
+                project_email,
+                openai_api_key=settings.openai_api_key,
+                openai_model=settings.openai_model,
+                allow_llm=True,
+                strip_names=collect_core_strip_names(
+                    session,
+                    project_email,
+                    extra_names=[own_company] if own_company else None,
+                ),
+            )
         project_lines.append(
             TalentProposalProjectLine(
                 title=project.title,
@@ -377,44 +360,115 @@ def talent_propose_preview(
                 settlement_range=project.settlement_range,
                 interview_count=project.interview_count,
                 summary=project.summary,
+                core_body=core_body or None,
             )
         )
 
-    company_name, contact_name = resolve_source_party(
-        session,
-        source_email,
-        company_name_fallback=talent.source_company_name,
-    )
-    settings_map = load_settings(session)
-    body_text = build_talent_proposal_body_multi(
-        talent_display_name=talent.display_name,
-        projects=project_lines,
-        template=str(settings_map.get(SETTING_KEY_TEMPLATE_PROJECT_PROPOSE) or ""),
-        company_name=company_name,
-        contact_name=contact_name,
-        rate_markdown_man_yen=parse_talent_propose_rate_markup(
-            settings_map.get(SETTING_KEY_TALENT_PROPOSE_RATE_MARKUP)
-        ),
-    )
+    body_text = ""
+    if not already_sent:
+        company_name, contact_name = resolve_source_party(
+            session,
+            source_email,
+            company_name_fallback=talent.source_company_name,
+        )
+        body_text = build_talent_proposal_body_multi(
+            talent_display_name=talent.display_name,
+            projects=project_lines,
+            template=str(settings_map.get(SETTING_KEY_TEMPLATE_PROJECT_PROPOSE) or ""),
+            company_name=company_name,
+            contact_name=contact_name,
+            rate_markdown_man_yen=parse_talent_propose_rate_markup(
+                settings_map.get(SETTING_KEY_TALENT_PROPOSE_RATE_MARKUP)
+            ),
+        )
+
     first_project_title = project_titles[0] if project_titles else None
     combined_title = " / ".join(t for t in project_titles if t) or first_project_title
-    return TalentProposePreviewResponse(
-        drafts=[
-            TalentProposeDraft(
-                match_ids=[str(m.id) for m in pending],
-                match_id=str(pending[0].id),
-                project_ids=project_ids,
-                project_id=project_ids[0],
-                project_titles=project_titles,
-                project_title=combined_title,
-                to_address=source_email.from_address if source_email else None,
-                cc_addresses=_proposal_cc_list(talent),
-                subject=_reply_subject(source_email.subject if source_email else None, first_project_title),
-                body_text=body_text,
+    return TalentProposeDraft(
+        match_ids=[str(m.id) for m in talent_matches],
+        match_id=str(talent_matches[0].id),
+        project_ids=project_ids,
+        project_id=project_ids[0] if project_ids else str(talent_matches[0].project_id),
+        project_titles=project_titles,
+        project_title=combined_title,
+        talent_id=str(talent.id),
+        talent_name=talent.display_name,
+        to_address=source_email.from_address if source_email else None,
+        cc_addresses=_proposal_cc_list(talent),
+        subject=_reply_subject(source_email.subject if source_email else None, first_project_title),
+        body_text=body_text,
+        already_sent=already_sent,
+        warning=_manual_email_warning(source_email),
+    )
+
+
+@router.post("/talent-propose/preview", response_model=TalentProposePreviewResponse)
+def talent_propose_preview(
+    body: TalentProposePreviewRequest,
+    session: Session = Depends(get_db),
+) -> TalentProposePreviewResponse:
+    """案件提案メール下書き。複数人材の場合は人材ごとに1下書きを返す。"""
+    if not body.match_ids:
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "ERR-0001", "error_message": "match_ids が空です。"},
+        )
+    ids = [_parse_uuid(mid, "match_id") for mid in body.match_ids]
+    matches = list(session.scalars(select(Match).where(Match.id.in_(ids))).all())
+    by_id = {m.id: m for m in matches}
+    missing = [str(i) for i in ids if i not in by_id]
+    if missing:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "ERR-0012", "error_message": "対象のマッチが見つかりません。"},
+        )
+
+    ordered = [by_id[i] for i in ids]
+    already = _already_sent_match_ids(session, ids)
+    settings_map = load_settings(session)
+
+    by_talent: dict[UUID, list[Match]] = {}
+    talent_order: list[UUID] = []
+    for match in ordered:
+        if match.talent_id not in by_talent:
+            talent_order.append(match.talent_id)
+            by_talent[match.talent_id] = []
+        by_talent[match.talent_id].append(match)
+
+    drafts: list[TalentProposeDraft] = []
+    for talent_id in talent_order:
+        talent_matches = by_talent[talent_id]
+        pending = [m for m in talent_matches if m.id not in already]
+        talent = session.get(Talent, talent_id)
+        if talent is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"error_code": "ERR-0012", "error_message": "人材が見つかりません。"},
+            )
+        if not pending:
+            drafts.append(
+                _build_talent_propose_draft_for_talent(
+                    session,
+                    talent=talent,
+                    talent_matches=talent_matches,
+                    settings_map=settings_map,
+                    already_sent=True,
+                )
+            )
+            continue
+        drafts.append(
+            _build_talent_propose_draft_for_talent(
+                session,
+                talent=talent,
+                talent_matches=pending,
+                settings_map=settings_map,
                 already_sent=False,
             )
-        ]
-    )
+        )
+
+    # コア原文キャッシュを永続化
+    session.commit()
+    return TalentProposePreviewResponse(drafts=drafts)
 
 
 @router.post("/talent-propose", response_model=OutreachActionResponse)
@@ -431,30 +485,55 @@ def talent_propose(body: TalentProposeRequest) -> OutreachActionResponse:
     to_address = (body.to_address or "").strip() or None
     cc_addresses = body.cc_addresses
     body_text = ""
+    by_match_payload: dict[str, dict[str, object]] = {}
+
     if body.drafts:
-        # 1通まとめ: 最初の非空本文を採用
         for draft in body.drafts:
-            text = draft.body_text.strip()
-            if text:
+            text = (draft.body_text or "").strip()
+            if not text:
+                continue
+            draft_match_ids = list(draft.match_ids or [])
+            if not draft_match_ids and draft.match_id:
+                draft_match_ids = [draft.match_id]
+            if not draft_match_ids:
+                continue
+            draft_to = (draft.to_address or "").strip() or None
+            draft_cc = (
+                [str(addr).strip() for addr in draft.cc_addresses if str(addr).strip()]
+                if draft.cc_addresses is not None
+                else None
+            )
+            entry: dict[str, object] = {"body": draft.body_text}
+            if draft_to:
+                entry["to_address"] = draft_to
+            if draft_cc is not None:
+                entry["cc_addresses"] = draft_cc
+            for mid in draft_match_ids:
+                by_match_payload[str(_parse_uuid(mid, "match_id"))] = entry
+            # 単一ドラフト互換: 先頭をグローバルにも載せる
+            if not body_text:
                 body_text = draft.body_text
-                if draft.to_address and draft.to_address.strip():
-                    to_address = draft.to_address.strip()
-                if draft.cc_addresses is not None:
-                    cc_addresses = draft.cc_addresses
-                break
-        if not body_text.strip():
+                if draft_to:
+                    to_address = draft_to
+                if draft_cc is not None:
+                    cc_addresses = draft_cc
+
+        if not by_match_payload and not body_text.strip():
             raise HTTPException(
                 status_code=400,
                 detail={"error_code": "ERR-0001", "error_message": "本文が空です。"},
             )
+
     payload: dict[str, object] = {}
-    if body_text.strip():
+    if by_match_payload:
+        payload["by_match_id"] = by_match_payload
+    elif body_text.strip():
         payload["body"] = body_text
         extra_env["OUTREACH_BODY_TEXT"] = body_text
-    if to_address:
+    if to_address and "by_match_id" not in payload:
         payload["to_address"] = to_address
         extra_env["OUTREACH_TO_ADDRESS"] = to_address
-    if cc_addresses is not None:
+    if cc_addresses is not None and "by_match_id" not in payload:
         cleaned_cc = [str(addr).strip() for addr in cc_addresses if str(addr).strip()]
         payload["cc_addresses"] = cleaned_cc
         extra_env["OUTREACH_CC_ADDRESSES"] = ",".join(cleaned_cc)
@@ -482,8 +561,38 @@ def talent_propose(body: TalentProposeRequest) -> OutreachActionResponse:
             },
         ) from exc
     if result.exit_code != 0:
-        _raise_batch_error(fallback_message="案件提案の送信に失敗しました。")
-    return OutreachActionResponse(status="ok", message="案件提案を送信しました", sent=1)
+        _raise_batch_error(
+            fallback_message="案件提案の送信に失敗しました。",
+            after_byte_offset=result.log_offset_before,
+        )
+
+    sent = 0
+    failed = 0
+    try:
+        for line in reversed((result.stdout or "").strip().splitlines()):
+            text = line.strip()
+            if not text.startswith("{"):
+                continue
+            data = json.loads(text)
+            if isinstance(data, dict) and ("sent" in data or "failed" in data):
+                sent = int(data.get("sent") or 0)
+                failed = int(data.get("failed") or 0)
+                break
+    except Exception:
+        sent = 0
+    if sent == 0 and failed == 0:
+        # stdout に JSON が無い場合は下書き人数を概算に使う
+        if by_match_payload:
+            # 同一人材の複数 match は1通のため unique body entries ではなく drafts 数に近い値を返す
+            sent = len(body.drafts) if body.drafts else 1
+        else:
+            sent = 1
+    return OutreachActionResponse(
+        status="ok",
+        message=f"案件提案を送信しました（{sent}通）" if sent > 1 else "案件提案を送信しました",
+        sent=sent,
+        failed=failed,
+    )
 
 
 @router.post("/project-propose/preview", response_model=ProjectProposePreviewResponse)
@@ -685,7 +794,10 @@ def project_propose(body: ProjectProposeRequest) -> OutreachActionResponse:
             detail={"error_code": "ERR-0029", "error_message": "外部サービスへの接続がタイムアウトしました。"},
         ) from exc
     if result.exit_code != 0:
-        _raise_batch_error(fallback_message="人材提案の送信に失敗しました。")
+        _raise_batch_error(
+            fallback_message="人材提案の送信に失敗しました。",
+            after_byte_offset=result.log_offset_before,
+        )
     return OutreachActionResponse(status="ok", message="人材提案を送信しました", sent=1)
 
 
@@ -793,7 +905,10 @@ def trigger_reply_sync(
             detail={"error_code": "ERR-0029", "error_message": "外部サービスへの接続がタイムアウトしました。"},
         ) from exc
     if result.exit_code != 0:
-        _raise_batch_error(fallback_message="返信同期に失敗しました。")
+        _raise_batch_error(
+            fallback_message="返信同期に失敗しました。",
+            after_byte_offset=result.log_offset_before,
+        )
     label = {
         "talent_proposal": "案件提案メールの返信同期が完了しました",
         "project_proposal": "人材提案メールの返信同期が完了しました",

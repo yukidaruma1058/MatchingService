@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.batch_runner import BatchRunTimeoutError, read_last_batch_error, run_batch_job
 from app.deps import get_db
+from app.match_run_query import latest_completed_match_run
 from app.models import (
     Match,
     MatchRun,
@@ -27,6 +28,7 @@ router = APIRouter(prefix="/api/match-runs", tags=["match-runs"])
 class MatchRunCreateRequest(BaseModel):
     trigger: str = "manual"
     ai_judgement_top_n: int | None = Field(default=None, ge=1, le=20)
+    force: bool = False
 
 
 class MatchRunResponse(BaseModel):
@@ -64,8 +66,8 @@ class AiJudgeRequest(BaseModel):
     match_ids: list[str] | None = None
 
 
-def _raise_batch_error(*, fallback_message: str) -> None:
-    error = read_last_batch_error()
+def _raise_batch_error(*, fallback_message: str, after_byte_offset: int | None = None) -> None:
+    error = read_last_batch_error(after_byte_offset=after_byte_offset)
     if error:
         raise HTTPException(status_code=500, detail=error)
     raise HTTPException(
@@ -88,10 +90,14 @@ def _to_run_response(row: MatchRun) -> MatchRunResponse:
 
 @router.post("", response_model=MatchRunResponse)
 def create_match_run(body: MatchRunCreateRequest | None = None) -> MatchRunResponse:
-    """ルールスコア採点（BAT-003）を実行する。"""
-    _ = body
+    """ルールスコア採点（BAT-003）を実行する。
+
+    force=true のときのみ全件強制再採点。それ以外は増分。
+    """
+    force = bool(body and body.force)
+    extra_env = {"MATCH_FORCE_RESCORE": "1"} if force else None
     try:
-        result = run_batch_job("match")
+        result = run_batch_job("match", timeout_seconds=1800 if force else 600, extra_env=extra_env)
     except FileNotFoundError as exc:
         raise HTTPException(
             status_code=500,
@@ -107,13 +113,16 @@ def create_match_run(body: MatchRunCreateRequest | None = None) -> MatchRunRespo
         ) from exc
 
     if result.exit_code != 0:
-        _raise_batch_error(fallback_message="ルールスコア採点に失敗しました。")
+        _raise_batch_error(
+            fallback_message="ルールスコア採点に失敗しました。",
+            after_byte_offset=result.log_offset_before,
+        )
 
     from app.db import create_session_factory
 
     session_factory, _ = create_session_factory()
     with session_factory() as session:
-        row = session.scalar(select(MatchRun).order_by(MatchRun.started_at.desc()).limit(1))
+        row = latest_completed_match_run(session)
         if row is None:
             raise HTTPException(
                 status_code=500,
@@ -187,7 +196,10 @@ def run_ai_judge(
             },
         ) from exc
     if result.exit_code != 0:
-        _raise_batch_error(fallback_message="AI判定に失敗しました。")
+        _raise_batch_error(
+            fallback_message="AI判定に失敗しました。",
+            after_byte_offset=result.log_offset_before,
+        )
     session.refresh(row)
     return _to_run_response(row)
 

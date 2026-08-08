@@ -267,8 +267,12 @@ export type MatchRunDto = {
   finished_at: string | null;
 };
 
-export async function runMatchScoreBatch(): Promise<MatchRunDto> {
-  const response = await fetch(`${API_BASE_URL}/api/match-runs`, { method: "POST" });
+export async function runMatchScoreBatch(options?: { force?: boolean }): Promise<MatchRunDto> {
+  const response = await fetch(`${API_BASE_URL}/api/match-runs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ force: Boolean(options?.force) }),
+  });
   if (!response.ok) {
     try {
       const body = (await response.json()) as {
@@ -369,11 +373,14 @@ export type TalentProposeDraftDto = {
   project_id: string;
   project_titles: string[];
   project_title: string | null;
+  talent_id?: string | null;
+  talent_name?: string | null;
   to_address: string | null;
   cc_addresses?: string[];
   subject: string;
   body_text: string;
   already_sent: boolean;
+  warning?: string | null;
 };
 
 export async function previewTalentPropose(matchIds: string[]): Promise<TalentProposeDraftDto[]> {
@@ -419,6 +426,7 @@ export async function proposeTalents(
   matchIds: string[],
   drafts?: {
     match_id: string;
+    match_ids?: string[];
     body_text: string;
     to_address?: string | null;
     cc_addresses?: string[] | null;
@@ -428,6 +436,7 @@ export async function proposeTalents(
     match_ids: string[];
     drafts?: {
       match_id: string;
+      match_ids?: string[];
       body_text: string;
       to_address?: string | null;
       cc_addresses?: string[] | null;
@@ -438,7 +447,7 @@ export async function proposeTalents(
   if (drafts && drafts.length > 0) {
     body.drafts = drafts;
   }
-  // Same-origin Next プロキシ経由（旧 API の drafts 付き 500 / CORS 欠落を回避）
+  // Same-origin Next プロキシ経由（CORS / drafts 転送を Next 側で扱う）
   let response: Response;
   try {
     response = await fetch(`/api/outreach/talent-propose`, {
@@ -459,11 +468,15 @@ export async function proposeTalents(
     let detail = "案件提案の送信に失敗しました";
     try {
       const payload = (await response.json()) as {
-        detail?: string | { error_message?: string };
+        detail?: string | { error_message?: string; error_code?: string };
       };
       if (typeof payload.detail === "string") {
         detail = payload.detail;
-      } else if (payload.detail && typeof payload.detail === "object" && payload.detail.error_message) {
+      } else if (
+        payload.detail &&
+        typeof payload.detail === "object" &&
+        payload.detail.error_message
+      ) {
         detail = payload.detail.error_message;
       }
     } catch {
@@ -981,6 +994,41 @@ export type TalentUpdatePayload = {
   status?: "active" | "inactive";
 };
 
+export type TalentCreatePayload = {
+  title: string;
+  body: string;
+};
+
+async function readApiErrorMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const payload = (await response.json()) as {
+      detail?: string | { error_code?: string; error_message?: string };
+    };
+    const detail = payload.detail;
+    if (detail && typeof detail === "object" && detail.error_message) {
+      return detail.error_message;
+    }
+    if (typeof detail === "string" && detail) {
+      return detail;
+    }
+  } catch {
+    // ignore
+  }
+  return fallback;
+}
+
+export async function createTalent(body: TalentCreatePayload): Promise<TalentDto> {
+  const response = await fetch(`${API_BASE_URL}/api/talents`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    throw new Error(await readApiErrorMessage(response, "人材の登録に失敗しました"));
+  }
+  return response.json() as Promise<TalentDto>;
+}
+
 export async function updateTalent(id: string, body: TalentUpdatePayload): Promise<TalentDto> {
   const response = await fetch(`${API_BASE_URL}/api/talents/${id}`, {
     method: "PATCH",
@@ -1028,6 +1076,23 @@ export type ProjectUpdatePayload = {
   proposal_cc_emails?: string[];
   status?: "open" | "closed";
 };
+
+export type ProjectCreatePayload = {
+  title: string;
+  body: string;
+};
+
+export async function createProject(body: ProjectCreatePayload): Promise<ProjectDto> {
+  const response = await fetch(`${API_BASE_URL}/api/projects`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    throw new Error(await readApiErrorMessage(response, "案件の登録に失敗しました"));
+  }
+  return response.json() as Promise<ProjectDto>;
+}
 
 export async function updateProject(id: string, body: ProjectUpdatePayload): Promise<ProjectDto> {
   const response = await fetch(`${API_BASE_URL}/api/projects/${id}`, {
@@ -1306,6 +1371,8 @@ export type ProjectMatchItemDto = {
   match_run_id: string;
   talent_id: string;
   display_name: string | null;
+  affiliation?: string | null;
+  summary?: string | null;
   source_company_name?: string | null;
   introducer_company_id?: string | null;
   skills: string[];

@@ -114,14 +114,21 @@ export function Field({
   label,
   children,
   grow,
+  required,
 }: {
   label: string;
   children: ReactNode;
   grow?: boolean;
+  /** true=必須 / false=任意 / undefined=表示なし */
+  required?: boolean;
 }) {
   return (
     <div className={`field${grow ? " grow" : ""}`}>
-      <label>{label}</label>
+      <label>
+        {label}
+        {required === true ? <span className="field-req">必須</span> : null}
+        {required === false ? <span className="field-opt">任意</span> : null}
+      </label>
       {children}
     </div>
   );

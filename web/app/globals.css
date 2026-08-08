@@ -755,6 +755,100 @@ button.line-chart-legend-toggle.is-off .line-chart-swatch {
   flex-shrink: 0;
 }
 
+.list-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+  margin: 12px 0;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.list-pagination:first-child {
+  margin-top: 0;
+  border-top: none;
+  padding-top: 0;
+}
+
+.list-pagination-meta {
+  font-size: 0.875rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.list-pagination-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.list-pagination-pages {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.list-pagination-link,
+.list-pagination-page,
+.list-pagination-size-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  min-height: 34px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.list-pagination-link:hover,
+.list-pagination-page:hover,
+.list-pagination-size-btn:hover {
+  border-color: var(--brand);
+  color: var(--brand);
+  text-decoration: none;
+}
+
+.list-pagination-page.is-active,
+.list-pagination-size-btn.is-active {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+
+.list-pagination-link.is-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.list-pagination-ellipsis {
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.list-pagination-size {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.list-pagination-size-label {
+  font-size: 0.875rem;
+  color: var(--muted);
+  margin-right: 2px;
+}
+
 .list-filter-skill-sheet {
   display: flex;
   flex-wrap: wrap;
@@ -1058,6 +1152,25 @@ button.line-chart-legend-toggle.is-off .line-chart-swatch {
 .field { display: grid; gap: 6px; min-width: 140px; }
 .field.grow { flex: 1; min-width: 220px; }
 .field label { font-size: 0.8rem; color: var(--muted); }
+.field-req,
+.field-opt {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.4;
+  vertical-align: middle;
+}
+.field-req {
+  color: #9b1c1c;
+  background: #fde8e8;
+}
+.field-opt {
+  color: #374151;
+  background: #e5e7eb;
+}
 .field input,
 .field select,
 .field textarea {

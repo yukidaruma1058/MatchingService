@@ -55,13 +55,13 @@ docker compose -f .docker/docker-compose.yml up -d --build db api web
 docker compose -f .docker/docker-compose.yml --profile batch run --rm batch sort
 ```
 
-開発時のホットリロードは [`.docker/docker-compose.override.yml`](.docker/docker-compose.override.yml) を併用します。
+開発時の API ホットリロードは [`.docker/docker-compose.override.yml`](.docker/docker-compose.override.yml) を併用します（Web は本番ビルドのまま）。
 
 ```bash
 docker compose \
   -f .docker/docker-compose.yml \
   -f .docker/docker-compose.override.yml \
-  up --build db api web
+  up -d --build db api web
 ```
 
 ## エンドポイント

@@ -52,6 +52,9 @@ def ensure_schema(engine) -> None:
             "ALTER TABLE emails ADD COLUMN IF NOT EXISTS cc_addresses JSONB NOT NULL DEFAULT '[]'::jsonb"
         )
         conn.exec_driver_sql(
+            "ALTER TABLE emails ADD COLUMN IF NOT EXISTS body_core_text TEXT"
+        )
+        conn.exec_driver_sql(
             "ALTER TABLE talents ADD COLUMN IF NOT EXISTS proposal_cc_emails JSONB NOT NULL DEFAULT '[]'::jsonb"
         )
         conn.exec_driver_sql(
@@ -99,6 +102,18 @@ def ensure_schema(engine) -> None:
               END IF;
             END $$;
             """
+        )
+        conn.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS idx_matches_project_talent ON matches (project_id, talent_id)"
+        )
+        conn.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS idx_matches_pair_created ON matches (talent_id, project_id, created_at DESC)"
+        )
+        conn.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS idx_matches_run ON matches (match_run_id)"
+        )
+        conn.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS idx_matches_talent_project ON matches (talent_id, project_id)"
         )
         conn.exec_driver_sql(
             """

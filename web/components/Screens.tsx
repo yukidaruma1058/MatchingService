@@ -23,7 +23,9 @@ import {
   connectGmailFromWeb,
   createCompany,
   createContact,
+  createProject,
   createSkillCategory,
+  createTalent,
   deleteCompany,
   deleteProject,
   deleteSkillCategory,
@@ -127,25 +129,49 @@ function mergeTalentProposeBodies(drafts: TalentProposeDraftDto[]): string {
   if (drafts.length === 1) {
     return drafts[0].body_text;
   }
+  const greetingMarker = "以下の案件をご提案いたします。";
+  const closingMarker = "ご検討のほど";
   const first = drafts[0].body_text;
-  const greetingEnd = first.indexOf("以下の案件をご提案いたします。");
+  const greetingEnd = first.indexOf(greetingMarker);
   const header =
     greetingEnd >= 0
-      ? first.slice(0, greetingEnd + "以下の案件をご提案いたします。".length) + "\n\n"
-      : `${drafts[0].to_address ? "" : ""}お世話になっております。マッチング結果に基づき、以下の案件をご提案いたします。\n\n`;
+      ? first.slice(0, greetingEnd + greetingMarker.length) + "\n\n"
+      : "お世話になっております。マッチング結果に基づき、以下の案件をご提案いたします。\n\n";
+
   const blocks = drafts.map((draft, index) => {
-    const body = draft.body_text;
-    const start = body.indexOf("■ 案件名:");
-    const end = body.indexOf("ご検討のほど");
-    const block =
-      start >= 0
-        ? body
-            .slice(start, end >= 0 ? end : undefined)
-            .replace("■ 案件名:", `【${index + 1}】`)
-            .replace(/■ /g, "  ")
-            .trim()
-        : `【${index + 1}】${draft.project_title || draft.project_id}`;
-    return `${block}\n`;
+    const body = draft.body_text || "";
+    const end = body.indexOf(closingMarker);
+    const sliced = end >= 0 ? body.slice(0, end) : body;
+
+    // 新形式: 【n】案件名 + コア原文
+    const newStart = sliced.search(/【\d+】/);
+    if (newStart >= 0) {
+      const block = sliced
+        .slice(newStart)
+        .trim()
+        .replace(/^【\d+】/, `【${index + 1}】`);
+      return `${block}\n`;
+    }
+
+    // 旧形式: ■ 案件名:
+    const oldStart = sliced.indexOf("■ 案件名:");
+    if (oldStart >= 0) {
+      const block = sliced
+        .slice(oldStart)
+        .replace("■ 案件名:", `【${index + 1}】`)
+        .replace(/■ /g, "  ")
+        .trim();
+      return `${block}\n`;
+    }
+
+    // フォールバック: 案件名 + 本文全体（挨拶・締めを除ける範囲）
+    const afterGreeting = sliced.indexOf(greetingMarker);
+    const core =
+      afterGreeting >= 0
+        ? sliced.slice(afterGreeting + greetingMarker.length).trim()
+        : sliced.trim();
+    const title = draft.project_title || draft.project_id || `案件${index + 1}`;
+    return `【${index + 1}】${title}\n\n${core}\n`;
   });
   return `${header}${blocks.join("\n")}ご検討のほど、よろしくお願いいたします。\n`;
 }
@@ -179,9 +205,11 @@ export function ScreenRouter({ path, searchParams = {} }: ScreenProps) {
 function renderScreen(path: string, searchParams: SearchParams) {
   if (path === "/") return <DashboardScreen />;
   if (path === "/talents") return <TalentsScreen searchParams={searchParams} />;
+  if (path === "/talents/new") return <TalentFormScreen />;
   if (path.startsWith("/talents/"))
     return <TalentDetailScreen talentId={path.split("/")[2] ?? ""} searchParams={searchParams} />;
   if (path === "/projects") return <ProjectsScreen searchParams={searchParams} />;
+  if (path === "/projects/new") return <ProjectFormScreen />;
   if (path.startsWith("/projects/"))
     return <ProjectDetailScreen projectId={path.split("/")[2] ?? ""} searchParams={searchParams} />;
   if (path === "/companies") return <CompaniesScreen />;
@@ -346,8 +374,8 @@ function DashboardScreen() {
       return;
     }
     const confirmed = window.confirm(
-      `未採点の人材 ${unscoredTalents} 件・案件 ${unscoredProjects} 件を含むルール採点を実行します。\n` +
-        `採点結果の整合のため、稼働中の全人材 × 公開中の全案件を再採点します。よろしいですか？`,
+      `未採点の人材 ${unscoredTalents} 件・案件 ${unscoredProjects} 件向けに増分ルール採点を実行します。\n` +
+        `既に採点済みの人材×案件は再計算しません。よろしいですか？`,
     );
     if (!confirmed) {
       return;
@@ -356,9 +384,10 @@ function DashboardScreen() {
     setMatchScoreError(null);
     setMatchScoreNotice(null);
     try {
-      const result = await runMatchScoreBatch();
+      const result = await runMatchScoreBatch({ force: false });
       setMatchScoreNotice(
-        `ルール採点が完了しました（${formatMatchRunStatusLabel(result.status)}）: 組合せ ${String(result.stats?.match_count ?? "-")} 件`,
+        `未採点ルール採点が完了しました（${formatMatchRunStatusLabel(result.status)}）: 組合せ ${String(result.stats?.match_count ?? "-")} 件` +
+          (result.stats?.scored_count != null ? ` / 新規採点 ${String(result.stats.scored_count)} 件` : ""),
       );
       const dash = await fetchDashboard({ range: chartRange, end: chartEnd });
       setDashboard(dash);
@@ -367,6 +396,45 @@ function DashboardScreen() {
         setMatchScoreError({ code: error.errorCode, message: error.errorMessage });
       } else {
         setMatchScoreError({ code: "ERR-0030", message: "ルール採点の実行に失敗しました" });
+      }
+    } finally {
+      setIsRunningMatchScore(false);
+    }
+  }
+
+  async function handleForceMatchScore() {
+    const talentCount = dashboard?.talent_count ?? 0;
+    const projectCount = dashboard?.project_count ?? 0;
+    if (talentCount <= 0 || projectCount <= 0) {
+      setMatchScoreError(null);
+      setMatchScoreNotice("採点対象の人材または案件がありません。");
+      return;
+    }
+    const pairEstimate = talentCount * projectCount;
+    const confirmed = window.confirm(
+      `【注意】全件強制再採点を実行します。\n\n` +
+        `対象の目安: 人材 ${talentCount} × 案件 ${projectCount} ≒ ${pairEstimate} 組合せ\n` +
+        `既に採点済みのスコアもルール再計算で差し替えます（時間がかかることがあります）。\n\n` +
+        `本当に実行しますか？`,
+    );
+    if (!confirmed) {
+      return;
+    }
+    setIsRunningMatchScore(true);
+    setMatchScoreError(null);
+    setMatchScoreNotice(null);
+    try {
+      const result = await runMatchScoreBatch({ force: true });
+      setMatchScoreNotice(
+        `全件強制再採点が完了しました（${formatMatchRunStatusLabel(result.status)}）: 組合せ ${String(result.stats?.match_count ?? "-")} 件`,
+      );
+      const dash = await fetchDashboard({ range: chartRange, end: chartEnd });
+      setDashboard(dash);
+    } catch (error) {
+      if (error instanceof BatchRunError) {
+        setMatchScoreError({ code: error.errorCode, message: error.errorMessage });
+      } else {
+        setMatchScoreError({ code: "ERR-0030", message: "全件強制再採点に失敗しました" });
       }
     } finally {
       setIsRunningMatchScore(false);
@@ -429,11 +497,20 @@ function DashboardScreen() {
               onClick={() => void handleUnscoredMatchScore()}
               title={
                 hasUnscored
-                  ? "一度もルール採点されていない人材・案件を含む全件ルール採点を実行"
+                  ? "一度もルール採点されていない人材・案件だけを増分採点します"
                   : "未採点の人材・案件はありません"
               }
             >
               {isRunningMatchScore ? "採点中..." : matchScoreLabel}
+            </button>
+            <button
+              className="btn btn-danger"
+              type="button"
+              disabled={busy || (dashboard?.talent_count ?? 0) <= 0 || (dashboard?.project_count ?? 0) <= 0}
+              onClick={() => void handleForceMatchScore()}
+              title="active 人材 × open 案件をすべてルール再計算します（重い処理）"
+            >
+              {isRunningMatchScore ? "採点中..." : "全件強制再採点"}
             </button>
             <button
               className="btn btn-secondary"
@@ -1227,6 +1304,150 @@ function ScoreBandOkBars({
   );
 }
 
+const LIST_PAGE_SIZE_OPTIONS = [10, 50, 100] as const;
+type ListPageSize = (typeof LIST_PAGE_SIZE_OPTIONS)[number];
+
+function parseListPage(value: string | string[] | undefined): number {
+  const parsed = Number.parseInt(asString(value), 10);
+  return Number.isFinite(parsed) && parsed >= 1 ? parsed : 1;
+}
+
+function parseListPageSize(value: string | string[] | undefined): ListPageSize {
+  const parsed = Number.parseInt(asString(value), 10);
+  if (parsed === 50 || parsed === 100) {
+    return parsed;
+  }
+  return 10;
+}
+
+function paginateListItems<T>(items: T[], page: number, pageSize: number): T[] {
+  const start = (page - 1) * pageSize;
+  return items.slice(start, start + pageSize);
+}
+
+function listPageHref(
+  basePath: string,
+  searchParams: SearchParams,
+  overrides: { page?: number; page_size?: ListPageSize },
+): string {
+  const params = new URLSearchParams();
+  for (const [key, raw] of Object.entries(searchParams)) {
+    if (key === "page" || key === "page_size") {
+      continue;
+    }
+    if (Array.isArray(raw)) {
+      raw.forEach((item) => {
+        if (item) {
+          params.append(key, item);
+        }
+      });
+    } else if (raw) {
+      params.set(key, raw);
+    }
+  }
+  const page = overrides.page ?? parseListPage(searchParams.page);
+  const pageSize = overrides.page_size ?? parseListPageSize(searchParams.page_size);
+  if (page > 1) {
+    params.set("page", String(page));
+  }
+  if (pageSize !== 10) {
+    params.set("page_size", String(pageSize));
+  }
+  const qs = params.toString();
+  return qs ? `${basePath}?${qs}` : basePath;
+}
+
+function listPageNumbers(current: number, total: number): number[] {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, index) => index + 1);
+  }
+  const pages = new Set<number>([1, total, current, current - 1, current + 1]);
+  return [...pages].filter((page) => page >= 1 && page <= total).sort((a, b) => a - b);
+}
+
+function ListPagination({
+  basePath,
+  searchParams,
+  page,
+  pageSize,
+  totalItems,
+}: {
+  basePath: string;
+  searchParams: SearchParams;
+  page: number;
+  pageSize: ListPageSize;
+  totalItems: number;
+}) {
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const start = totalItems === 0 ? 0 : (safePage - 1) * pageSize + 1;
+  const end = Math.min(safePage * pageSize, totalItems);
+  const pageNumbers = listPageNumbers(safePage, totalPages);
+
+  return (
+    <div className="list-pagination">
+      <div className="list-pagination-meta">
+        {totalItems === 0 ? "0件" : `${start}–${end}件 / ${totalItems}件`}
+      </div>
+      <div className="list-pagination-nav">
+        {safePage > 1 ? (
+          <Link className="list-pagination-link" href={listPageHref(basePath, searchParams, { page: safePage - 1, page_size: pageSize })}>
+            前へ
+          </Link>
+        ) : (
+          <span className="list-pagination-link is-disabled">前へ</span>
+        )}
+        <div className="list-pagination-pages">
+          {pageNumbers.map((pageNumber, index) => {
+            const prev = pageNumbers[index - 1];
+            const showEllipsis = index > 0 && prev != null && pageNumber - prev > 1;
+            return (
+              <Fragment key={pageNumber}>
+                {showEllipsis ? <span className="list-pagination-ellipsis">…</span> : null}
+                {pageNumber === safePage ? (
+                  <span className="list-pagination-page is-active">{pageNumber}</span>
+                ) : (
+                  <Link
+                    className="list-pagination-page"
+                    href={listPageHref(basePath, searchParams, { page: pageNumber, page_size: pageSize })}
+                  >
+                    {pageNumber}
+                  </Link>
+                )}
+              </Fragment>
+            );
+          })}
+        </div>
+        {safePage < totalPages ? (
+          <Link className="list-pagination-link" href={listPageHref(basePath, searchParams, { page: safePage + 1, page_size: pageSize })}>
+            次へ
+          </Link>
+        ) : (
+          <span className="list-pagination-link is-disabled">次へ</span>
+        )}
+      </div>
+      <div className="list-pagination-size">
+        <span className="list-pagination-size-label">表示件数</span>
+        {LIST_PAGE_SIZE_OPTIONS.map((size) =>
+          size === pageSize ? (
+            <span key={size} className="list-pagination-size-btn is-active">
+              {size}件
+            </span>
+          ) : (
+            <Link
+              key={size}
+              className="list-pagination-size-btn"
+              href={listPageHref(basePath, searchParams, { page: 1, page_size: size })}
+            >
+              {size}件
+            </Link>
+          ),
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TalentsScreen({ searchParams }: { searchParams: SearchParams }) {
   const [talents, setTalents] = useState<TalentDto[]>([]);
   const [skillGroups, setSkillGroups] = useState(fallbackSkillGroups);
@@ -1239,6 +1460,8 @@ function TalentsScreen({ searchParams }: { searchParams: SearchParams }) {
   const okFilter = asString(searchParams.ok);
   const skillSheetHas = isQueryFlag(searchParams.skill_sheet_has);
   const skillSheetNone = isQueryFlag(searchParams.skill_sheet_none);
+  const page = parseListPage(searchParams.page);
+  const pageSize = parseListPageSize(searchParams.page_size);
 
   useEffect(() => {
     fetchTalents()
@@ -1266,6 +1489,9 @@ function TalentsScreen({ searchParams }: { searchParams: SearchParams }) {
     skillSheetHas,
     skillSheetNone,
   });
+  const totalPages = Math.max(1, Math.ceil(filteredTalents.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pagedTalents = paginateListItems(filteredTalents, safePage, pageSize);
 
   const onDeleteTalent = async (talent: TalentDto) => {
     const ok = window.confirm(
@@ -1286,7 +1512,12 @@ function TalentsScreen({ searchParams }: { searchParams: SearchParams }) {
     <>
       <Topbar
         title="人材一覧"
-        description="SES人材紹介メールから要約・登録された人材"
+        description="SES人材紹介メールから要約・登録された人材。画面からも登録できます。"
+        actions={
+          <ButtonLink href="/talents/new" variant="primary">
+            人材を登録
+          </ButtonLink>
+        }
       />
       {loadError ? <p className="notice">{loadError}</p> : null}
       <KeywordChipFilter
@@ -1305,11 +1536,25 @@ function TalentsScreen({ searchParams }: { searchParams: SearchParams }) {
         skillSheetHas={skillSheetHas}
         skillSheetNone={skillSheetNone}
       />
-      <Panel meta={<span className="muted">{filteredTalents.length}件 / {talents.length}件</span>}>
+      <Panel meta={<span className="muted">検索結果 {filteredTalents.length}件 / 全 {talents.length}件</span>}>
+        <ListPagination
+          basePath="/talents"
+          searchParams={searchParams}
+          page={safePage}
+          pageSize={pageSize}
+          totalItems={filteredTalents.length}
+        />
         <SimpleTalentTable
-          rows={filteredTalents}
+          rows={pagedTalents}
           skillGroups={skillGroups}
           onDelete={(talent) => void onDeleteTalent(talent)}
+        />
+        <ListPagination
+          basePath="/talents"
+          searchParams={searchParams}
+          page={safePage}
+          pageSize={pageSize}
+          totalItems={filteredTalents.length}
         />
       </Panel>
     </>
@@ -1584,7 +1829,8 @@ function TalentDetailScreen({
         setActionError("選択した案件はすべて提案済みです");
         return;
       }
-      // 新APIは1下書き、旧APIは案件ごと → 画面では常に1通にまとめる
+      // API は人材ごとに1下書き（複数案件は本文にコア原文を連結済み）。
+      // 旧API互換で複数件返ってきた場合のみクライアントで結合する。
       const draft =
         editable.length === 1
           ? {
@@ -1598,10 +1844,27 @@ function TalentDetailScreen({
             }
           : {
               ...editable[0],
-              match_ids: editable.map((row) => row.match_id),
-              project_ids: editable.map((row) => row.project_id),
-              project_titles: editable.map((row) => row.project_title || row.project_id),
-              project_title: editable.map((row) => row.project_title || row.project_id).join(" / "),
+              match_ids: editable.flatMap((row) =>
+                row.match_ids?.length ? row.match_ids : [row.match_id],
+              ),
+              project_ids: editable.flatMap((row) =>
+                row.project_ids?.length ? row.project_ids : [row.project_id],
+              ),
+              project_titles: editable.flatMap((row) =>
+                row.project_titles?.length
+                  ? row.project_titles
+                  : row.project_title
+                    ? [row.project_title]
+                    : [row.project_id],
+              ),
+              project_title: editable
+                .flatMap((row) =>
+                  row.project_titles?.length
+                    ? row.project_titles
+                    : [row.project_title || row.project_id],
+                )
+                .filter(Boolean)
+                .join(" / "),
               body_text: mergeTalentProposeBodies(editable),
               already_sent: false,
             };
@@ -1655,6 +1918,7 @@ function TalentDetailScreen({
       const result = await proposeTalents(matchIds, [
         {
           match_id: draft.match_id,
+          match_ids: matchIds,
           body_text: bodyText,
           to_address: toAddress,
           cc_addresses: parseAddressList(draftCc),
@@ -1746,7 +2010,7 @@ function TalentDetailScreen({
         <div ref={proposePanelRef}>
           <Panel title="案件提案の確認・編集">
             <p className="muted">
-              選択した案件は1通のメールにまとめて送信します。宛先・CC・本文を確認・編集してから送信してください。件名は変更できません。
+              選択した案件は1通のメールにまとめます。本文の案件部分は取込メールのコア原文です。宛先・CC・本文を確認・編集してから送信してください。件名は変更できません。
             </p>
             {drafts.map((draft) => (
               <article key={draft.match_id} className="propose-draft-card">
@@ -2202,6 +2466,8 @@ function ProjectsScreen({ searchParams }: { searchParams: SearchParams }) {
   const selectedSkills = asArray(searchParams.skills);
   const proposedFilter = asString(searchParams.proposed);
   const okFilter = asString(searchParams.ok);
+  const page = parseListPage(searchParams.page);
+  const pageSize = parseListPageSize(searchParams.page_size);
 
   useEffect(() => {
     fetchProjects()
@@ -2224,7 +2490,7 @@ function ProjectsScreen({ searchParams }: { searchParams: SearchParams }) {
     setActionError(null);
     setMessage(null);
     try {
-      const result = await runMatchScoreBatch();
+      const result = await runMatchScoreBatch({ force: false });
       setMessage(
         `採点完了（${formatMatchRunStatusLabel(result.status)}）: 組合せ ${String(result.stats?.match_count ?? "-")} 件`,
       );
@@ -2263,6 +2529,9 @@ function ProjectsScreen({ searchParams }: { searchParams: SearchParams }) {
     proposed: proposedFilter,
     ok: okFilter,
   });
+  const totalPages = Math.max(1, Math.ceil(filteredProjects.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pagedProjects = paginateListItems(filteredProjects, safePage, pageSize);
 
   const onDeleteProject = async (project: ProjectDto) => {
     const ok = window.confirm(
@@ -2283,9 +2552,12 @@ function ProjectsScreen({ searchParams }: { searchParams: SearchParams }) {
     <>
       <Topbar
         title="案件一覧"
-        description="案件の検索・応募状況・マッチング結果を1画面で確認"
+        description="案件の検索・応募状況・マッチング結果を1画面で確認。画面からも登録できます。"
         actions={
           <>
+            <ButtonLink href="/projects/new" variant="secondary">
+              案件を登録
+            </ButtonLink>
             <button
               type="button"
               className="btn btn-secondary"
@@ -2316,8 +2588,22 @@ function ProjectsScreen({ searchParams }: { searchParams: SearchParams }) {
         okFilter={okFilter}
         showOutreachFilters
       />
-      <Panel title="案件" meta={<span className="muted">{filteredProjects.length}件 / {projects.length}件</span>}>
-        <SimpleProjectTable rows={filteredProjects} onDelete={(project) => void onDeleteProject(project)} />
+      <Panel title="案件" meta={<span className="muted">検索結果 {filteredProjects.length}件 / 全 {projects.length}件</span>}>
+        <ListPagination
+          basePath="/projects"
+          searchParams={searchParams}
+          page={safePage}
+          pageSize={pageSize}
+          totalItems={filteredProjects.length}
+        />
+        <SimpleProjectTable rows={pagedProjects} onDelete={(project) => void onDeleteProject(project)} />
+        <ListPagination
+          basePath="/projects"
+          searchParams={searchParams}
+          page={safePage}
+          pageSize={pageSize}
+          totalItems={filteredProjects.length}
+        />
       </Panel>
     </>
   );
@@ -2344,6 +2630,9 @@ function ProjectDetailScreen({
   const [draftBody, setDraftBody] = useState("");
   const [draftTo, setDraftTo] = useState("");
   const [draftCc, setDraftCc] = useState("");
+  /** 人材へ案件紹介（BAT-007）の下書き。配信元向け「人材を提案」とは別。 */
+  const [talentDrafts, setTalentDrafts] = useState<TalentProposeDraftDto[] | null>(null);
+  const [talentDraftCcTexts, setTalentDraftCcTexts] = useState<string[]>([]);
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editProjectCode, setEditProjectCode] = useState("");
@@ -2533,11 +2822,11 @@ function ProjectDetailScreen({
   };
 
   useEffect(() => {
-    if (!draft) {
+    if (!draft && !(talentDrafts && talentDrafts.length > 0)) {
       return;
     }
     proposePanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [draft]);
+  }, [draft, talentDrafts]);
 
   useEffect(() => {
     if (!projectId) {
@@ -2626,6 +2915,8 @@ function ProjectDetailScreen({
     setBusy(true);
     setActionError(null);
     setMessage(null);
+    setTalentDrafts(null);
+    setTalentDraftCcTexts([]);
     try {
       const next = await previewProjectPropose(projectId, selectedIds);
       if (next.already_sent) {
@@ -2660,6 +2951,128 @@ function ProjectDetailScreen({
     setDraftBody("");
     setDraftTo("");
     setDraftCc("");
+  };
+
+  const onOpenTalentIntroducePreview = async () => {
+    if (selectedIds.length === 0) {
+      setActionError("案件紹介する人材を選択してください");
+      return;
+    }
+    setBusy(true);
+    setActionError(null);
+    setMessage(null);
+    setDraft(null);
+    setDraftBody("");
+    setDraftTo("");
+    setDraftCc("");
+    try {
+      const rows = await previewTalentPropose(selectedIds);
+      const editable = rows.filter((row) => !row.already_sent);
+      if (editable.length === 0) {
+        setTalentDrafts(null);
+        setTalentDraftCcTexts([]);
+        setActionError("選択した人材はすべて案件紹介済みです");
+        return;
+      }
+      setTalentDrafts(
+        editable.map((row) => ({
+          ...row,
+          to_address: row.to_address || "",
+          body_text: row.body_text || "",
+          cc_addresses: row.cc_addresses ?? [],
+        })),
+      );
+      setTalentDraftCcTexts(
+        editable.map((row) =>
+          row.cc_addresses && row.cc_addresses.length > 0 ? row.cc_addresses.join(", ") : "",
+        ),
+      );
+      const skipped = selectedIds.length - editable.reduce((sum, row) => sum + (row.match_ids?.length || 1), 0);
+      const warnings = editable.filter((row) => row.warning).length;
+      const parts: string[] = [];
+      if (skipped > 0) {
+        parts.push(`${skipped} 件は紹介済みのため確認対象から除外しました`);
+      }
+      if (warnings > 0) {
+        parts.push(`${warnings} 名は送信不可の警告があります（手動登録など）`);
+      }
+      if (parts.length > 0) {
+        setMessage(parts.join(" / "));
+      }
+    } catch (err) {
+      setTalentDrafts(null);
+      setTalentDraftCcTexts([]);
+      setActionError(err instanceof Error ? err.message : "案件紹介下書きの取得に失敗しました");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onCancelTalentIntroducePreview = () => {
+    setTalentDrafts(null);
+    setTalentDraftCcTexts([]);
+  };
+
+  const updateTalentDraft = (
+    index: number,
+    patch: Partial<Pick<TalentProposeDraftDto, "body_text" | "to_address" | "cc_addresses">>,
+  ) => {
+    setTalentDrafts((current) => {
+      if (!current) {
+        return current;
+      }
+      return current.map((row, i) => (i === index ? { ...row, ...patch } : row));
+    });
+  };
+
+  const onSendTalentIntroduceDrafts = async () => {
+    if (!talentDrafts || talentDrafts.length === 0) {
+      setActionError("送信する下書きがありません");
+      return;
+    }
+    for (const row of talentDrafts) {
+      if (row.warning) {
+        setActionError(
+          `${row.talent_name || row.talent_id || "人材"}: ${row.warning}`,
+        );
+        return;
+      }
+      if (!(row.body_text || "").trim()) {
+        setActionError(`${row.talent_name || row.talent_id || "人材"}: 本文が空です`);
+        return;
+      }
+      if (!(row.to_address || "").trim()) {
+        setActionError(`${row.talent_name || row.talent_id || "人材"}: 宛先が空です`);
+        return;
+      }
+    }
+    const allMatchIds = talentDrafts.flatMap((row) =>
+      row.match_ids?.length ? row.match_ids : [row.match_id],
+    );
+    setBusy(true);
+    setActionError(null);
+    setMessage(null);
+    try {
+      const result = await proposeTalents(
+        allMatchIds,
+        talentDrafts.map((row, index) => ({
+          match_id: row.match_id,
+          match_ids: row.match_ids?.length ? row.match_ids : [row.match_id],
+          body_text: (row.body_text || "").trim(),
+          to_address: (row.to_address || "").trim(),
+          cc_addresses: parseAddressList(talentDraftCcTexts[index] ?? ""),
+        })),
+      );
+      setMessage(result.message || "案件紹介メールを送信しました");
+      setTalentDrafts(null);
+      setTalentDraftCcTexts([]);
+      setSelected({});
+      await reloadMatches();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "案件紹介メールの送信に失敗しました");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const onSendProposeDraft = async () => {
@@ -2761,6 +3174,14 @@ function ProjectDetailScreen({
             <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void onOpenProposePreview()}>
               {busy ? "処理中…" : "人材を提案"}
             </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={busy}
+              onClick={() => void onOpenTalentIntroducePreview()}
+            >
+              {busy ? "処理中…" : "人材へ案件紹介"}
+            </button>
             <button type="button" className="btn btn-danger" disabled={busy} onClick={() => void onDeleteProject()}>
               {busy ? "処理中…" : "削除"}
             </button>
@@ -2856,6 +3277,78 @@ function ProjectDetailScreen({
                 {busy ? "送信中…" : "送信"}
               </button>
               <button type="button" className="btn btn-ghost" disabled={busy} onClick={onCancelProposePreview}>
+                キャンセル
+              </button>
+            </div>
+          </Panel>
+        </div>
+      ) : null}
+      {talentDrafts && talentDrafts.length > 0 ? (
+        <div ref={proposePanelRef}>
+          <Panel title="案件紹介メールの確認・編集">
+            <p className="muted">
+              選択した要員の紹介メールへ、案件取込メールのコア原文をテンプレートに載せて返信します（1人1通）。内容を確認してから送信してください。
+            </p>
+            {talentDrafts.map((row, index) => (
+              <article key={row.talent_id || row.match_id} className="propose-draft-card">
+                <h3>{row.talent_name || row.talent_id || "人材"}</h3>
+                {row.warning ? <p className="notice">{row.warning}</p> : null}
+                <div className="field">
+                  <label htmlFor={`talent-introduce-to-${index}`}>宛先</label>
+                  <input
+                    id={`talent-introduce-to-${index}`}
+                    type="email"
+                    value={row.to_address || ""}
+                    onChange={(event) => updateTalentDraft(index, { to_address: event.target.value })}
+                    placeholder="to@example.com"
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor={`talent-introduce-cc-${index}`}>CC（カンマ区切り）</label>
+                  <input
+                    id={`talent-introduce-cc-${index}`}
+                    type="text"
+                    value={talentDraftCcTexts[index] ?? ""}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setTalentDraftCcTexts((current) => {
+                        const next = [...current];
+                        next[index] = value;
+                        return next;
+                      });
+                    }}
+                    placeholder="cc1@example.com, cc2@example.com"
+                  />
+                </div>
+                <dl className="kv-list">
+                  <Kv label="件名" value={row.subject} />
+                </dl>
+                <div className="field">
+                  <label htmlFor={`talent-introduce-body-${index}`}>本文</label>
+                  <textarea
+                    id={`talent-introduce-body-${index}`}
+                    rows={14}
+                    value={row.body_text || ""}
+                    onChange={(event) => updateTalentDraft(index, { body_text: event.target.value })}
+                  />
+                </div>
+              </article>
+            ))}
+            <div className="topbar-actions" style={{ marginTop: 16 }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={busy}
+                onClick={() => void onSendTalentIntroduceDrafts()}
+              >
+                {busy ? "送信中…" : "送信"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={busy}
+                onClick={onCancelTalentIntroducePreview}
+              >
                 キャンセル
               </button>
             </div>
@@ -3062,7 +3555,7 @@ function ProjectDetailScreen({
       <KeywordChipFilter
         action={`/projects/${projectId}`}
         keyword={keyword}
-        keywordPlaceholder="氏名 / 配信元 / スキル / 理由"
+        keywordPlaceholder="氏名 / 所属 / 配信元 / スキル / 営業コメント / 理由"
         rateMin={rateMin}
         rateMax={rateMax}
         selectedSkills={selectedSkills}
@@ -3519,6 +4012,170 @@ function CompanyDetailScreen({ companyId }: { companyId: string }) {
             </table>
           </div>
         )}
+      </Panel>
+    </>
+  );
+}
+
+function TalentFormScreen() {
+  const [title, setTitle] = useState("");
+  const [bodyText, setBodyText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const onSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    const subject = title.trim();
+    const body = bodyText.trim();
+    if (!subject) {
+      setError("タイトルを入力してください");
+      return;
+    }
+    if (!body) {
+      setError("本文を入力してください");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const saved = await createTalent({ title: subject, body });
+      window.location.href = `/talents/${saved.id}`;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "人材の登録に失敗しました");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <Topbar
+        title="人材を登録"
+        description="タイトルと本文を入力すると、メール取込と同様に AI 要約〜ルール採点まで実行します。"
+        actions={<ButtonLink href="/talents">一覧へ戻る</ButtonLink>}
+      />
+      {error ? <p className="notice">{error}</p> : null}
+      <Panel title="登録内容">
+        <p className="muted field-help-block">
+          メールの件名と本文を貼り付けてください。スキル・単価などは AI が抽出します（登録後に詳細画面で修正できます）。
+        </p>
+        <form className="form-grid" onSubmit={(event) => void onSubmit(event)} noValidate>
+          <Field label="タイトル" required grow>
+            <input
+              value={title}
+              onChange={(event) => {
+                setTitle(event.target.value);
+                if (error) {
+                  setError(null);
+                }
+              }}
+              placeholder="メール件名や要員名など"
+              disabled={busy}
+            />
+          </Field>
+          <Field label="本文" required grow>
+            <textarea
+              rows={16}
+              value={bodyText}
+              onChange={(event) => {
+                setBodyText(event.target.value);
+                if (error) {
+                  setError(null);
+                }
+              }}
+              placeholder="人材紹介メールの本文を貼り付け"
+              disabled={busy}
+            />
+          </Field>
+          <div className="topbar-actions">
+            <button type="submit" className="btn btn-primary" disabled={busy}>
+              {busy ? "AI要約・採点中…" : "登録"}
+            </button>
+            <ButtonLink href="/talents">キャンセル</ButtonLink>
+          </div>
+        </form>
+      </Panel>
+    </>
+  );
+}
+
+function ProjectFormScreen() {
+  const [title, setTitle] = useState("");
+  const [bodyText, setBodyText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const onSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    const subject = title.trim();
+    const body = bodyText.trim();
+    if (!subject) {
+      setError("タイトルを入力してください");
+      return;
+    }
+    if (!body) {
+      setError("本文を入力してください");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const saved = await createProject({ title: subject, body });
+      window.location.href = `/projects/${saved.id}`;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "案件の登録に失敗しました");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <Topbar
+        title="案件を登録"
+        description="タイトルと本文を入力すると、メール取込と同様に AI 要約〜ルール採点まで実行します。"
+        actions={<ButtonLink href="/projects">一覧へ戻る</ButtonLink>}
+      />
+      {error ? <p className="notice">{error}</p> : null}
+      <Panel title="登録内容">
+        <p className="muted field-help-block">
+          メールの件名と本文を貼り付けてください。スキル・単価などは AI が抽出します（登録後に詳細画面で修正できます）。
+        </p>
+        <form className="form-grid" onSubmit={(event) => void onSubmit(event)} noValidate>
+          <Field label="タイトル" required grow>
+            <input
+              value={title}
+              onChange={(event) => {
+                setTitle(event.target.value);
+                if (error) {
+                  setError(null);
+                }
+              }}
+              placeholder="メール件名や案件名など"
+              disabled={busy}
+            />
+          </Field>
+          <Field label="本文" required grow>
+            <textarea
+              rows={16}
+              value={bodyText}
+              onChange={(event) => {
+                setBodyText(event.target.value);
+                if (error) {
+                  setError(null);
+                }
+              }}
+              placeholder="案件配信メールの本文を貼り付け"
+              disabled={busy}
+            />
+          </Field>
+          <div className="topbar-actions">
+            <button type="submit" className="btn btn-primary" disabled={busy}>
+              {busy ? "AI要約・採点中…" : "登録"}
+            </button>
+            <ButtonLink href="/projects">キャンセル</ButtonLink>
+          </div>
+        </form>
       </Panel>
     </>
   );
@@ -4414,10 +5071,10 @@ function SettingsScreen({ searchParams }: { searchParams: SearchParams }) {
               onChange={(event) => setTemplateProjectPropose(event.target.value)}
             />
             <p className="muted field-help-block">
-              プレースホルダ: {"{{company_name}}"}（企業名）, {"{{contact_name}}"}（担当者名）, {"{{items}}"}（案件一覧ブロック）
+              プレースホルダ: {"{{company_name}}"}（企業名）, {"{{contact_name}}"}（担当者名）, {"{{items}}"}（案件コア原文ブロック）
             </p>
             <p className="muted field-help-block">
-              {"{{items}}"} の各案件には【連番】案件名の下に、必須スキル / 単価帯 / 勤務形態 / 勤務時間 / 開始 / 精算幅 / おすすめポイント（AI採点で保存した内容。未採点時は省略）を出力します。単価帯は設定の調整額 N を差し引いた値になります。値がない項目は行ごと省略されます。
+              {"{{items}}"} には各案件について【連番】案件名の下に、取込元案件メールからヘッダー／フッター／署名等を除いたコア原文を載せます（下書き作成時に LLM 抽出・キャッシュ）。要約はしません。下書き画面で編集してから送信できます。
             </p>
           </div>
           <div className="field">
@@ -4450,7 +5107,7 @@ function SettingsScreen({ searchParams }: { searchParams: SearchParams }) {
               <span className="score-input-suffix">万円</span>
             </div>
             <p className="muted field-help-block">
-              人材詳細から紹介元へ送る案件提案メールのみ、案件単価帯の上下限からそれぞれ N 万円を差し引きます（例: 60〜70万・N=5 → 55〜65万）。案件詳細から配信元へ送る要員提案の単価は希望単価のままです。マスタやルール採点の単価は変わりません。0 で調整なし。
+              案件提案メールで構造化の単価帯を出す場合の調整額です（現状の下書きは案件メールのコア原文を載せるため、通常は使いません）。例: 60〜70万・N=5 → 55〜65万。0 で調整なし。
             </p>
           </div>
           <div className="field">
@@ -6581,7 +7238,14 @@ function filterProjectMatches(
 
   return matches.filter((row) => {
     const haystack = normalize(
-      [row.display_name, row.source_company_name, row.reason, ...(row.skills ?? [])]
+      [
+        row.display_name,
+        row.affiliation,
+        row.source_company_name,
+        row.summary,
+        row.reason,
+        ...(row.skills ?? []),
+      ]
         .filter(Boolean)
         .join(" "),
     );

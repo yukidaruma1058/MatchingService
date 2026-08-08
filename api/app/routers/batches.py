@@ -17,8 +17,13 @@ class BatchRunResponse(BaseModel):
 router = APIRouter(prefix="/api/batches", tags=["batches"])
 
 
-def _raise_batch_error(*, fallback_code: str = "ERR-0030", fallback_message: str) -> None:
-    error = read_last_batch_error()
+def _raise_batch_error(
+    *,
+    fallback_code: str = "ERR-0030",
+    fallback_message: str,
+    after_byte_offset: int | None = None,
+) -> None:
+    error = read_last_batch_error(after_byte_offset=after_byte_offset)
     if error:
         raise HTTPException(status_code=500, detail=error)
     raise HTTPException(
@@ -53,7 +58,10 @@ def trigger_gmail_pipeline() -> dict[str, str]:
         ) from exc
 
     if result.exit_code != 0:
-        _raise_batch_error(fallback_message="メール振り分け・取込・ルール採点に失敗しました。")
+        _raise_batch_error(
+            fallback_message="メール振り分け・取込・ルール採点に失敗しました。",
+            after_byte_offset=result.log_offset_before,
+        )
 
     return {
         "status": "ok",
@@ -85,7 +93,10 @@ def trigger_ingest_cleanup() -> dict[str, str]:
         ) from exc
 
     if result.exit_code != 0:
-        _raise_batch_error(fallback_message="過去データ削除に失敗しました。")
+        _raise_batch_error(
+            fallback_message="過去データ削除に失敗しました。",
+            after_byte_offset=result.log_offset_before,
+        )
 
     return {
         "status": "ok",

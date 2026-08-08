@@ -60,6 +60,14 @@ class _ExtractedMail:
     error: BaseException | None = None
 
 
+@dataclass
+class _PendingSkillSheet:
+    talent_id: object
+    gmail_message_id: str
+    body_text: str | None
+    body_html: str | None
+
+
 class GmailIngestBatch:
     """BAT-002 メール取込・要約バッチ。"""
 
@@ -167,6 +175,7 @@ class GmailIngestBatch:
             },
         )
 
+        pending_sheets: list[_PendingSkillSheet] = []
         for email_type, source_label, processed_label in targets:
             self._process_label(
                 client=client,
@@ -176,6 +185,7 @@ class GmailIngestBatch:
                 email_type=email_type,
                 source_label=source_label,
                 processed_label=processed_label,
+                pending_sheets=pending_sheets,
             )
 
         duration_ms = int((time.perf_counter() - started) * 1000)
@@ -195,8 +205,31 @@ class GmailIngestBatch:
                 "skipped": stats.skipped,
                 "failed": stats.failed,
                 "ai_concurrency": self.ai_concurrency,
+                "pending_skill_sheets": len(pending_sheets),
             },
         )
+
+        # スキルシートは要約・DB登録完了後に処理（取込本体の壁時計から分離）
+        if pending_sheets:
+            sheet_started = time.perf_counter()
+            self._ingest_pending_skill_sheets(
+                session_factory=session_factory,
+                client=client,
+                pending_sheets=pending_sheets,
+            )
+            log_event(
+                self.logger,
+                logging.INFO,
+                event="gmail_ingest.skill_sheets_finished",
+                message="Deferred skill sheet ingest finished",
+                operation="スキルシート保存",
+                method_name="run",
+                job_id=self.job_id,
+                function_id=self.function_id,
+                duration_ms=int((time.perf_counter() - sheet_started) * 1000),
+                extra={"count": len(pending_sheets)},
+            )
+
         return stats
 
     def _process_label(
@@ -209,6 +242,7 @@ class GmailIngestBatch:
         email_type: str,
         source_label: str,
         processed_label: str,
+        pending_sheets: list[_PendingSkillSheet],
     ) -> None:
         try:
             message_ids = client.list_message_ids_with_label(source_label)
@@ -233,17 +267,34 @@ class GmailIngestBatch:
             ingest_settings.processed_project_label,
         ]
 
-        # Phase 1: Gmail fetch は直列（API クライアント共有のため）
+        # Phase 1: Gmail fetch（軽度並列）
+        fetch_results = map_parallel(
+            message_ids,
+            lambda message_id: self._fetch_one(client, message_id),
+            concurrency=self.ai_concurrency,
+        )
         fetched: list[_FetchedMail] = []
-        for message_id in message_ids:
+        for message_id, message, fetch_error in fetch_results:
             stats.scanned += 1
-            try:
-                message = client.fetch_message(message_id)
-            except GmailConfigError as exc:
+            if fetch_error is not None:
                 stats.failed += 1
-                self._log_message_failed(message_id, exc, "Gmail本文取得", "fetch_message")
+                if isinstance(fetch_error, GmailConfigError):
+                    self._log_message_failed(message_id, fetch_error, "Gmail本文取得", "fetch_message")
+                else:
+                    log_error_event(
+                        self.logger,
+                        event="gmail_ingest.message_failed",
+                        error_code="ERR-0030",
+                        detail=str(fetch_error),
+                        operation="Gmail本文取得",
+                        method_name="fetch_message",
+                        job_id=self.job_id,
+                        function_id=self.function_id,
+                        module_name="BAT-002.gmail_ingest",
+                        gmail_message_id=message_id,
+                    )
                 continue
-
+            assert message is not None
             if client.has_any_label(message.label_ids, processed_labels):
                 stats.skipped += 1
                 continue
@@ -270,7 +321,7 @@ class GmailIngestBatch:
             concurrency=self.ai_concurrency,
         )
 
-        # Phase 3: DB 保存・ラベル移動は直列（入力順を維持）
+        # Phase 3: DB 保存・ラベル移動は直列（入力順を維持）。スキルシートは run 後段。
         for item in extracted:
             self._persist_one(
                 client=client,
@@ -280,7 +331,18 @@ class GmailIngestBatch:
                 source_label=source_label,
                 processed_label=processed_label,
                 item=item,
+                pending_sheets=pending_sheets,
             )
+
+    def _fetch_one(
+        self,
+        client: GmailClient,
+        message_id: str,
+    ) -> tuple[str, GmailMessage | None, BaseException | None]:
+        try:
+            return message_id, client.fetch_message(message_id), None
+        except BaseException as exc:  # noqa: BLE001
+            return message_id, None, exc
 
     def _extract_one(self, item: _FetchedMail, *, email_type: str) -> _ExtractedMail:
         try:
@@ -305,6 +367,7 @@ class GmailIngestBatch:
         source_label: str,
         processed_label: str,
         item: _ExtractedMail,
+        pending_sheets: list[_PendingSkillSheet],
     ) -> None:
         message = item.fetched.message
         message_id = item.fetched.message_id
@@ -419,35 +482,14 @@ class GmailIngestBatch:
                     )
                     talent_row = session.get(Talent, entity_id)
                     if talent_row is not None:
-                        settings_map = load_all_settings(session)
-                        folder_id = str(settings_map.get("skill_sheet_drive_folder_id") or "").strip()
-                        # スキルシート失敗で人材取込全体を落とさない（SAVEPOINT）
-                        try:
-                            with session.begin_nested():
-                                ingest_talent_skill_sheets(
-                                    session=session,
-                                    gmail=client,
-                                    talent=talent_row,
-                                    gmail_message_id=message.message_id,
-                                    body_text=message.body_text,
-                                    body_html=message.body_html,
-                                    root_folder_id=folder_id,
-                                    logger=self.logger,
-                                    job_id=self.job_id,
-                                )
-                        except Exception as sheet_exc:  # noqa: BLE001
-                            log_error_event(
-                                self.logger,
-                                event="gmail_ingest.skill_sheet_failed",
-                                error_code="ERR-0015",
-                                detail=str(sheet_exc),
-                                operation="スキルシート保存",
-                                method_name="ingest_talent_skill_sheets",
-                                job_id=self.job_id,
-                                function_id=self.function_id,
-                                module_name="BAT-002.gmail_ingest",
+                        pending_sheets.append(
+                            _PendingSkillSheet(
+                                talent_id=entity_id,
                                 gmail_message_id=message.message_id,
+                                body_text=message.body_text,
+                                body_html=message.body_html,
                             )
+                        )
                 else:
                     entity_id = upsert_project_from_email(
                         session,
@@ -542,6 +584,51 @@ class GmailIngestBatch:
                 "entity_status": entity_status,
             },
         )
+
+    def _ingest_pending_skill_sheets(
+        self,
+        *,
+        session_factory,
+        client: GmailClient,
+        pending_sheets: list[_PendingSkillSheet],
+    ) -> None:
+        def _one(job: _PendingSkillSheet) -> None:
+            with session_factory() as session:
+                talent_row = session.get(Talent, job.talent_id)
+                if talent_row is None:
+                    return
+                settings_map = load_all_settings(session)
+                folder_id = str(settings_map.get("skill_sheet_drive_folder_id") or "").strip()
+                try:
+                    with session.begin_nested():
+                        ingest_talent_skill_sheets(
+                            session=session,
+                            gmail=client,
+                            talent=talent_row,
+                            gmail_message_id=job.gmail_message_id,
+                            body_text=job.body_text,
+                            body_html=job.body_html,
+                            root_folder_id=folder_id,
+                            logger=self.logger,
+                            job_id=self.job_id,
+                        )
+                    session.commit()
+                except Exception as sheet_exc:  # noqa: BLE001
+                    session.rollback()
+                    log_error_event(
+                        self.logger,
+                        event="gmail_ingest.skill_sheet_failed",
+                        error_code="ERR-0015",
+                        detail=str(sheet_exc),
+                        operation="スキルシート保存",
+                        method_name="ingest_talent_skill_sheets",
+                        job_id=self.job_id,
+                        function_id=self.function_id,
+                        module_name="BAT-002.gmail_ingest",
+                        gmail_message_id=job.gmail_message_id,
+                    )
+
+        map_parallel(pending_sheets, _one, concurrency=1)
 
     def _log_message_failed(self, message_id: str, exc: GmailConfigError, operation: str, method_name: str) -> None:
         log_error_event(

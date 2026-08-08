@@ -17,6 +17,7 @@ from app.db import load_settings
 from app.deps import get_db
 from app.gmail_client import GmailClient, GmailConfigError
 from app.gmail_credentials import ensure_gmail_credentials_file
+from app.match_run_query import latest_completed_match_run
 from app.models import (
     Company,
     Email,
@@ -368,7 +369,7 @@ def _build_funnel(
     if ingested == 0:
         return DashboardFunnel()
 
-    latest_run = session.scalar(select(MatchRun).order_by(MatchRun.started_at.desc()).limit(1))
+    latest_run = latest_completed_match_run(session)
     matches: list[Match] = []
     if latest_run is not None and (talent_ids or project_ids):
         conditions = []
