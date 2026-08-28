@@ -44,7 +44,7 @@ from app.models import (
     SystemSetting,
     Talent,
 )
-from app.skill_sheet_experience import load_skill_sheet_experience
+from app.skill_sheet_experience import load_skill_sheet_experience, prepare_skill_sheets_for_talent_ids
 
 # score_band は BAT-003 と同じ定義をインライン（import 衝突回避）
 def score_band_for(score: int) -> str:
@@ -64,6 +64,8 @@ class AiJudgeStats:
     ai_judged: int = 0
     skipped: int = 0
     failed: int = 0
+    skill_sheets_prepared: int = 0
+    skill_sheets_skipped: int = 0
     errors: list[str] = field(default_factory=list)
 
 
@@ -661,18 +663,9 @@ def run_ai_judge_batch(
         matches_by_id: dict[UUID, Match] = {}
 
         # 明示選択の match_ids がある場合は、返信 OK/NG 条件をスキップしてそのまま AI 判定する
+        target_matches: list[Match] = []
         if match_ids:
-            targets = list(session.scalars(select(Match).where(Match.id.in_(match_ids))).all())
-            for match in targets:
-                _enqueue_llm_job(
-                    session=session,
-                    match=match,
-                    own_company_name=own_company_name,
-                    stats=stats,
-                    jobs=llm_jobs,
-                    matches_by_id=matches_by_id,
-                    cfg=cfg,
-                )
+            target_matches = list(session.scalars(select(Match).where(Match.id.in_(match_ids))).all())
         else:
             if match_run_id is None:
                 run = session.scalar(select(MatchRun).order_by(MatchRun.started_at.desc()).limit(1))
@@ -726,19 +719,45 @@ def run_ai_judge_batch(
                     key=lambda m: m.score,
                     reverse=True,
                 )
-                targets = ok_matches[:top_n]
-                stats.skipped += max(0, len(ok_matches) - len(targets))
+                selected = ok_matches[:top_n]
+                stats.skipped += max(0, len(ok_matches) - len(selected))
+                target_matches.extend(selected)
 
-                for match in targets:
-                    _enqueue_llm_job(
-                        session=session,
-                        match=match,
-                        own_company_name=own_company_name,
-                        stats=stats,
-                        jobs=llm_jobs,
-                        matches_by_id=matches_by_id,
-                        cfg=cfg,
-                    )
+        # 採点対象人材のスキルシートを AI 判定直前に取込（メール取込時からは分離）
+        talent_ids = [m.talent_id for m in target_matches]
+        if talent_ids:
+            sheet_stats = prepare_skill_sheets_for_talent_ids(
+                session_factory=session_factory,
+                talent_ids=talent_ids,
+                cfg=cfg,
+                logger=logger,
+                job_id=job_id,
+            )
+            stats.skill_sheets_prepared = int(sheet_stats.get("ingested", 0))
+            stats.skill_sheets_skipped = int(sheet_stats.get("skipped_existing", 0))
+            log_event(
+                logger,
+                logging.INFO,
+                event="matching.ai_judge.skill_sheets_prepared",
+                message="Skill sheets prepared for AI judge targets",
+                operation="スキルシート取込",
+                method_name="run_ai_judge_batch",
+                job_id=job_id,
+                function_id="BAT-004",
+                module_name="BAT-004.ai_judge",
+                extra=sheet_stats,
+            )
+
+        for match in target_matches:
+            _enqueue_llm_job(
+                session=session,
+                match=match,
+                own_company_name=own_company_name,
+                stats=stats,
+                jobs=llm_jobs,
+                matches_by_id=matches_by_id,
+                cfg=cfg,
+            )
 
         # LLM のみ軽度並列。DB 書き込みはメインスレッドで直列
         results = map_parallel(
@@ -775,6 +794,8 @@ def run_ai_judge_batch(
             "failed": stats.failed,
             "ai_concurrency": concurrency,
             "llm_jobs": len(results),
+            "skill_sheets_prepared": stats.skill_sheets_prepared,
+            "skill_sheets_skipped": stats.skill_sheets_skipped,
         },
     )
     return stats

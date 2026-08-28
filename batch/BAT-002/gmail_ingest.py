@@ -9,14 +9,10 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-import threading
 import time
 from dataclasses import dataclass
-from pathlib import Path
-from uuid import UUID
 
 from db import (
     extract_email_address,
@@ -30,7 +26,6 @@ from summarizer import ExtractionResult, extract_email_fields
 
 from app.ai_concurrency import map_parallel, resolve_ai_concurrency
 from app.batch_job_id import resolve_batch_job_id
-from app.batch_tmp import resolve_batch_tmp_dir
 from app.config import Settings, settings
 from app.db_bootstrap import create_session_factory, ensure_schema
 from app.email_db import load_all_settings, upsert_sorted_email
@@ -39,14 +34,6 @@ from app.gmail_credentials import ensure_gmail_credentials_file
 from app.proposal_cc import resolve_proposal_cc
 from app.label_settings import IngestSettings, load_ingest_settings
 from app.logging_util import get_batch_logger, log_error_event, log_event
-from app.models import Talent
-from app.skill_sheet_ingest import (
-    SKILL_SHEET_CONCURRENCY,
-    connect_skill_sheet_drive,
-    ingest_talent_skill_sheets,
-)
-
-_BATCH_ROOT = Path(__file__).resolve().parent.parent
 
 
 @dataclass
@@ -72,14 +59,6 @@ class _ExtractedMail:
     error: BaseException | None = None
 
 
-@dataclass
-class _PendingSkillSheet:
-    talent_id: object
-    gmail_message_id: str
-    body_text: str | None
-    body_html: str | None
-
-
 class GmailIngestBatch:
     """BAT-002 メール取込・要約バッチ。"""
 
@@ -92,70 +71,24 @@ class GmailIngestBatch:
         self.ai_concurrency = resolve_ai_concurrency(getattr(self.cfg, "ai_concurrency", 3))
         self.ingest_scope = (os.environ.get("INGEST_SCOPE") or "all").strip().lower()
 
-    def _pending_skill_sheets_path(self) -> Path | None:
-        pipeline_job_id = (os.environ.get("PIPELINE_JOB_ID") or "").strip()
-        if not pipeline_job_id:
-            return None
-        return resolve_batch_tmp_dir() / f"pending_skill_sheets_{pipeline_job_id}.json"
-
-    def _save_pending_skill_sheets(self, pending_sheets: list[_PendingSkillSheet]) -> None:
-        path = self._pending_skill_sheets_path()
-        if path is None or not pending_sheets:
-            return
-        payload = [
-            {
-                "talent_id": str(item.talent_id),
-                "gmail_message_id": item.gmail_message_id,
-                "body_text": item.body_text,
-                "body_html": item.body_html,
-            }
-            for item in pending_sheets
-        ]
-        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-
-    def _load_pending_skill_sheets(self) -> list[_PendingSkillSheet]:
-        path = self._pending_skill_sheets_path()
-        if path is None or not path.is_file():
-            return []
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(raw, list):
-            return []
-        sheets: list[_PendingSkillSheet] = []
-        for item in raw:
-            if not isinstance(item, dict):
-                continue
-            talent_raw = item.get("talent_id")
-            if not talent_raw:
-                continue
-            try:
-                talent_id = UUID(str(talent_raw))
-            except ValueError:
-                continue
-            sheets.append(
-                _PendingSkillSheet(
-                    talent_id=talent_id,
-                    gmail_message_id=str(item.get("gmail_message_id") or ""),
-                    body_text=item.get("body_text"),
-                    body_html=item.get("body_html"),
-                )
-            )
-        return sheets
-
-    def _clear_pending_skill_sheets_file(self) -> None:
-        path = self._pending_skill_sheets_path()
-        if path is None or not path.is_file():
-            return
-        try:
-            path.unlink(missing_ok=True)
-        except OSError:
-            pass
-
     def run(self) -> IngestBatchStats:
         started = time.perf_counter()
         stats = IngestBatchStats()
 
         if self.ingest_scope == "skill_sheets":
-            return self._run_skill_sheets_only(started)
+            # スキルシート取込は AI 採点（BAT-004）側へ移管済み
+            log_event(
+                self.logger,
+                logging.INFO,
+                event="gmail_ingest.started",
+                message="Skill sheet ingest skipped (deferred to AI judge)",
+                operation="スキルシート取込",
+                method_name="run",
+                job_id=self.job_id,
+                function_id=self.function_id,
+                extra={"ingest_scope": "skill_sheets", "deferred_to": "ai_judge"},
+            )
+            return stats
 
         log_event(
             self.logger,
@@ -263,7 +196,6 @@ class GmailIngestBatch:
             },
         )
 
-        pending_sheets: list[_PendingSkillSheet] = []
         for email_type, source_label, processed_label in targets:
             self._process_label(
                 client=client,
@@ -273,11 +205,7 @@ class GmailIngestBatch:
                 email_type=email_type,
                 source_label=source_label,
                 processed_label=processed_label,
-                pending_sheets=pending_sheets,
             )
-
-        if self.ingest_scope == "talent" and pending_sheets:
-            self._save_pending_skill_sheets(pending_sheets)
 
         duration_ms = int((time.perf_counter() - started) * 1000)
         log_event(
@@ -296,88 +224,10 @@ class GmailIngestBatch:
                 "skipped": stats.skipped,
                 "failed": stats.failed,
                 "ai_concurrency": self.ai_concurrency,
-                "pending_skill_sheets": len(pending_sheets),
                 "ingest_scope": self.ingest_scope,
             },
         )
 
-        if self.ingest_scope == "all" and pending_sheets:
-            sheet_started = time.perf_counter()
-            self._ingest_pending_skill_sheets(
-                session_factory=session_factory,
-                client=client,
-                pending_sheets=pending_sheets,
-            )
-            log_event(
-                self.logger,
-                logging.INFO,
-                event="gmail_ingest.skill_sheets_finished",
-                message="Deferred skill sheet ingest finished",
-                operation="スキルシート保存",
-                method_name="run",
-                job_id=self.job_id,
-                function_id=self.function_id,
-                duration_ms=int((time.perf_counter() - sheet_started) * 1000),
-                extra={"count": len(pending_sheets), "concurrency": SKILL_SHEET_CONCURRENCY},
-            )
-
-        return stats
-
-    def _run_skill_sheets_only(self, started: float) -> IngestBatchStats:
-        stats = IngestBatchStats()
-        pending_sheets = self._load_pending_skill_sheets()
-        log_event(
-            self.logger,
-            logging.INFO,
-            event="gmail_ingest.started",
-            message="Skill sheet ingest started",
-            operation="スキルシート取込開始",
-            method_name="run",
-            job_id=self.job_id,
-            function_id=self.function_id,
-            extra={"ingest_scope": "skill_sheets", "pending_skill_sheets": len(pending_sheets)},
-        )
-        if not pending_sheets:
-            log_event(
-                self.logger,
-                logging.INFO,
-                event="gmail_ingest.skill_sheets_finished",
-                message="No pending skill sheets",
-                operation="スキルシート保存",
-                method_name="run",
-                job_id=self.job_id,
-                function_id=self.function_id,
-                extra={"total": 0, "done": 0, "ingest_scope": "skill_sheets"},
-            )
-            return stats
-
-        session_factory, engine = create_session_factory(self.cfg.database_url)
-        ensure_schema(engine)
-        with session_factory() as session:
-            db_settings = load_all_settings(session)
-        if not ensure_gmail_credentials_file(self.cfg, db_settings):
-            raise GmailConfigError("ERR-0018", "Gmail credentials file not found")
-        client = GmailClient(self.cfg.gmail_credentials_path, self.cfg.gmail_token_path)
-        client.connect()
-        self._ingest_pending_skill_sheets(
-            session_factory=session_factory,
-            client=client,
-            pending_sheets=pending_sheets,
-        )
-        self._clear_pending_skill_sheets_file()
-        duration_ms = int((time.perf_counter() - started) * 1000)
-        log_event(
-            self.logger,
-            logging.INFO,
-            event="gmail_ingest.finished",
-            message="Skill sheet ingest finished",
-            operation="スキルシート取込完了",
-            method_name="run",
-            job_id=self.job_id,
-            function_id=self.function_id,
-            duration_ms=duration_ms,
-            extra={"ingest_scope": "skill_sheets", "pending_skill_sheets": len(pending_sheets)},
-        )
         return stats
 
     def _process_label(
@@ -390,7 +240,6 @@ class GmailIngestBatch:
         email_type: str,
         source_label: str,
         processed_label: str,
-        pending_sheets: list[_PendingSkillSheet],
     ) -> None:
         try:
             message_ids = client.list_message_ids_with_label(source_label)
@@ -521,7 +370,7 @@ class GmailIngestBatch:
             },
         )
 
-        # Phase 3: DB 保存・ラベル移動は直列（入力順を維持）。スキルシートは run 後段。
+        # Phase 3: DB 保存・ラベル移動は直列（入力順を維持）
         for item in extracted:
             self._persist_one(
                 client=client,
@@ -531,7 +380,6 @@ class GmailIngestBatch:
                 source_label=source_label,
                 processed_label=processed_label,
                 item=item,
-                pending_sheets=pending_sheets,
             )
 
     def _fetch_one(
@@ -567,7 +415,6 @@ class GmailIngestBatch:
         source_label: str,
         processed_label: str,
         item: _ExtractedMail,
-        pending_sheets: list[_PendingSkillSheet],
     ) -> None:
         message = item.fetched.message
         message_id = item.fetched.message_id
@@ -680,16 +527,6 @@ class GmailIngestBatch:
                         from_header=message.from_header,
                         talent_id=entity_id,
                     )
-                    talent_row = session.get(Talent, entity_id)
-                    if talent_row is not None:
-                        pending_sheets.append(
-                            _PendingSkillSheet(
-                                talent_id=entity_id,
-                                gmail_message_id=message.message_id,
-                                body_text=message.body_text,
-                                body_html=message.body_html,
-                            )
-                        )
                 else:
                     entity_id = upsert_project_from_email(
                         session,
@@ -783,159 +620,6 @@ class GmailIngestBatch:
                 "needs_review": extraction.needs_review,
                 "entity_status": entity_status,
             },
-        )
-
-    def _ingest_pending_skill_sheets(
-        self,
-        *,
-        session_factory,
-        client: GmailClient,
-        pending_sheets: list[_PendingSkillSheet],
-    ) -> None:
-        if not pending_sheets:
-            return
-
-        with session_factory() as session:
-            settings_map = load_all_settings(session)
-            folder_id = str(settings_map.get("skill_sheet_drive_folder_id") or "").strip()
-
-        if not folder_id:
-            log_event(
-                self.logger,
-                logging.WARNING,
-                event="gmail_ingest.skill_sheet_skipped",
-                message="skill_sheet_drive_folder_id is empty; skip all skill sheet ingest",
-                operation="スキルシート保存",
-                method_name="_ingest_pending_skill_sheets",
-                job_id=self.job_id,
-                function_id=self.function_id,
-                extra={"count": len(pending_sheets), "total": len(pending_sheets), "done": 0},
-            )
-            log_event(
-                self.logger,
-                logging.INFO,
-                event="gmail_ingest.skill_sheets_finished",
-                message="Skill sheet ingest skipped",
-                operation="スキルシート保存",
-                method_name="_ingest_pending_skill_sheets",
-                job_id=self.job_id,
-                function_id=self.function_id,
-                extra={"total": len(pending_sheets), "done": 0, "skipped": len(pending_sheets)},
-            )
-            return
-
-        try:
-            drive_context = connect_skill_sheet_drive(
-                credentials_path=str(client.credentials_path),
-                token_path=str(client.token_path),
-                root_folder_id=folder_id,
-            )
-        except GmailConfigError as exc:
-            log_error_event(
-                self.logger,
-                event="gmail_ingest.skill_sheet_drive_unavailable",
-                error_code=exc.error_code,
-                detail=exc.message,
-                operation="スキルシート Drive接続",
-                method_name="_ingest_pending_skill_sheets",
-                job_id=self.job_id,
-                function_id=self.function_id,
-            )
-            return
-
-        gmail_lock = threading.Lock()
-        total_sheets = len(pending_sheets)
-        done_sheets = {"count": 0}
-        progress_lock = threading.Lock()
-
-        log_event(
-            self.logger,
-            logging.INFO,
-            event="gmail_ingest.skill_sheets_started",
-            message="Skill sheet ingest started",
-            operation="スキルシート保存",
-            method_name="_ingest_pending_skill_sheets",
-            job_id=self.job_id,
-            function_id=self.function_id,
-            extra={"total": total_sheets, "done": 0},
-        )
-
-        def _one(job: _PendingSkillSheet) -> None:
-            with session_factory() as session:
-                talent_row = session.get(Talent, job.talent_id)
-                if talent_row is None:
-                    with progress_lock:
-                        done_sheets["count"] += 1
-                        done = done_sheets["count"]
-                    log_event(
-                        self.logger,
-                        logging.INFO,
-                        event="gmail_ingest.skill_sheet_progress",
-                        message="Skill sheet progress",
-                        operation="スキルシート保存",
-                        method_name="_ingest_pending_skill_sheets",
-                        job_id=self.job_id,
-                        function_id=self.function_id,
-                        extra={"total": total_sheets, "done": done},
-                    )
-                    return
-                try:
-                    with session.begin_nested():
-                        ingest_talent_skill_sheets(
-                            session=session,
-                            gmail=client,
-                            talent=talent_row,
-                            gmail_message_id=job.gmail_message_id,
-                            body_text=job.body_text,
-                            body_html=job.body_html,
-                            root_folder_id=folder_id,
-                            logger=self.logger,
-                            job_id=self.job_id,
-                            drive_context=drive_context,
-                            gmail_lock=gmail_lock,
-                        )
-                    session.commit()
-                except Exception as sheet_exc:  # noqa: BLE001
-                    session.rollback()
-                    log_error_event(
-                        self.logger,
-                        event="gmail_ingest.skill_sheet_failed",
-                        error_code="ERR-0015",
-                        detail=str(sheet_exc),
-                        operation="スキルシート保存",
-                        method_name="ingest_talent_skill_sheets",
-                        job_id=self.job_id,
-                        function_id=self.function_id,
-                        module_name="BAT-002.gmail_ingest",
-                        gmail_message_id=job.gmail_message_id,
-                    )
-                finally:
-                    with progress_lock:
-                        done_sheets["count"] += 1
-                        done = done_sheets["count"]
-                    log_event(
-                        self.logger,
-                        logging.INFO,
-                        event="gmail_ingest.skill_sheet_progress",
-                        message="Skill sheet progress",
-                        operation="スキルシート保存",
-                        method_name="_ingest_pending_skill_sheets",
-                        job_id=self.job_id,
-                        function_id=self.function_id,
-                        extra={"total": total_sheets, "done": done},
-                    )
-
-        map_parallel(pending_sheets, _one, concurrency=SKILL_SHEET_CONCURRENCY)
-        log_event(
-            self.logger,
-            logging.INFO,
-            event="gmail_ingest.skill_sheets_finished",
-            message="Skill sheet ingest finished",
-            operation="スキルシート保存",
-            method_name="_ingest_pending_skill_sheets",
-            job_id=self.job_id,
-            function_id=self.function_id,
-            extra={"total": total_sheets, "done": done_sheets["count"]},
         )
 
     def _log_message_failed(self, message_id: str, exc: GmailConfigError, operation: str, method_name: str) -> None:

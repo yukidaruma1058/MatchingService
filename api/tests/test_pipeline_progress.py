@@ -32,7 +32,6 @@ class PipelineProgressTests(unittest.TestCase):
                     "steps": [
                         "ingest_talent",
                         "ingest_project",
-                        "ingest_skill_sheets",
                         "cleanup",
                         "match",
                         "reply_sync",
@@ -80,7 +79,7 @@ class PipelineProgressTests(unittest.TestCase):
         self.assertEqual(progress.phase, "ingest_talent")
         self.assertGreater(progress.progress_percent, 0)
         self.assertLess(progress.progress_percent, 100)
-        self.assertEqual(len(progress.steps), 6)
+        self.assertEqual(len(progress.steps), 5)
         talent_step = next(step for step in progress.steps if step.id == "ingest_talent")
         self.assertEqual(talent_step.status, "running")
         self.assertGreater(talent_step.progress_percent, 0)

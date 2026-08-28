@@ -491,7 +491,7 @@ def parse_pipeline_progress(job_id: str, *, log_path: Path | None = None) -> Pip
                     )
 
     if not enabled_steps:
-        enabled_steps = ["ingest_talent", "ingest_project", "ingest_skill_sheets", "cleanup", "match", "reply_sync"]
+        enabled_steps = ["ingest_talent", "ingest_project", "cleanup", "match", "reply_sync"]
 
     weights = _normalize_weights(enabled_steps)
     now = datetime.now(UTC)

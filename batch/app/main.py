@@ -4,13 +4,13 @@
 ジョブ名とバッチ ID の対応:
   - ``ingest`` → BAT-002（メール取込・要約）
   - ``manual_register`` → BAT-002（画面のタイトル+本文から AI 要約登録。MANUAL_EMAIL_ID 必須）
-  - ``pipeline`` → BAT-002 → BAT-006 → BAT-003 →（設定ONなら BAT-004）→ BAT-008
-    （取込・採点・任意でAI判定・返信同期）
+  - ``pipeline`` → BAT-002 → BAT-006 → BAT-003 →（設定ONなら BAT-004＝スキルシート取込+AI判定）→ BAT-008
+    （取込・採点・任意でAI判定・返信同期。スキルシートは AI 判定時に対象人材のみ取込）
   - ``cleanup`` → BAT-006（取込データ削除）
   - ``match`` → BAT-003（ルールスコア採点）
   - ``talent_propose`` → BAT-007（要員側へ案件提案・手動）
   - ``reply_sync`` → BAT-008（返信同期・OK/NG）
-  - ``ai_judge`` → BAT-004（AI判定）
+  - ``ai_judge`` → BAT-004（スキルシート取込＋AI判定）
   - ``project_propose`` → BAT-009（案件側へ要員提案・手動）
 """
 
@@ -198,7 +198,7 @@ def run(job: str, *, match_trigger: str = "manual") -> int:
         return 0 if result.ok else 1
 
     if job == "pipeline":
-        # 基本セット: 人材取込 → 案件取込 → スキルシート → BAT-006 → BAT-003 →（任意 BAT-004）→ BAT-008
+        # 基本セット: 人材取込 → 案件取込 → BAT-006 → BAT-003 →（任意 BAT-004・スキルシート取込含む）→ BAT-008
         import os
         import time
         import uuid as _uuid
@@ -211,7 +211,6 @@ def run(job: str, *, match_trigger: str = "manual") -> int:
         pipeline_step_defs: list[tuple[str, str, dict[str, str]]] = [
             ("ingest_talent", "ingest", {"INGEST_SCOPE": "talent"}),
             ("ingest_project", "ingest", {"INGEST_SCOPE": "project"}),
-            ("ingest_skill_sheets", "ingest", {"INGEST_SCOPE": "skill_sheets"}),
             ("cleanup", "cleanup", {}),
             ("match", "match", {}),
         ]
