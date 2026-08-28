@@ -94,7 +94,7 @@ class GmailClient:
         if missing:
             raise GmailConfigError("ERR-0020", f"Gmail label not found: {', '.join(missing)}")
 
-    def count_messages_with_label(self, label_name: str, *, max_count: int = 500) -> tuple[int, bool]:
+    def count_messages_with_label(self, label_name: str, *, max_count: int = 1000) -> tuple[int, bool]:
         """指定ラベルのメール件数を返す。
 
         Returns:

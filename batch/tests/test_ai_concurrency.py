@@ -13,7 +13,7 @@ class AiConcurrencyTests(unittest.TestCase):
         self.assertEqual(resolve_ai_concurrency(0), 1)
         self.assertEqual(resolve_ai_concurrency(1), 1)
         self.assertEqual(resolve_ai_concurrency(3), 3)
-        self.assertEqual(resolve_ai_concurrency(9), 4)
+        self.assertEqual(resolve_ai_concurrency(9), 8)
         self.assertEqual(resolve_ai_concurrency(None), 3)
 
     def test_map_parallel_preserves_order(self) -> None:
@@ -33,6 +33,12 @@ class AiConcurrencyTests(unittest.TestCase):
 
         self.assertEqual(map_parallel([7], work, concurrency=3), [7])
         self.assertEqual(calls, [7])
+
+    def test_map_parallel_allows_none_results(self) -> None:
+        def work(_: int) -> None:
+            return None
+
+        self.assertEqual(map_parallel([1, 2, 3], work, concurrency=2), [None, None, None])
 
 
 if __name__ == "__main__":

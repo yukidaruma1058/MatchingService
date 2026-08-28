@@ -6,7 +6,7 @@ if [ "$#" -eq 0 ]; then
 fi
 
 case "$1" in
-  sort|ingest|pipeline|cleanup)
+  ingest|pipeline|cleanup)
     exec python -u -m app.main "$@"
     ;;
   python)

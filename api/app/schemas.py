@@ -11,12 +11,8 @@ class SettingsResponse(BaseModel):
     """設定画面で利用する system_settings の取得レスポンス。"""
 
     ingest_data_retention_days: int = Field(0, ge=0, le=3650)
-    gmail_sort_source_label: str = "SES未振り分け"
     gmail_sort_label_talent: str = "SES人材紹介"
     gmail_sort_label_project: str = "SES案件配信"
-    gmail_sort_unknown_label: str = "SES要確認"
-    gmail_sort_keywords_talent: str = "人材\n要員\nスキルシート\nご紹介"
-    gmail_sort_keywords_project: str = "案件\n募集\n開発\nお問い合わせ"
     ai_assist_enabled: bool = False
     ai_judgement_top_n: int = Field(5, ge=1, le=20)
     own_company_name: str = ""
@@ -43,12 +39,8 @@ class SettingsUpdateRequest(BaseModel):
     """設定画面からの部分更新リクエスト。"""
 
     ingest_data_retention_days: int | None = Field(None, ge=0, le=3650)
-    gmail_sort_source_label: str | None = None
     gmail_sort_label_talent: str | None = None
     gmail_sort_label_project: str | None = None
-    gmail_sort_unknown_label: str | None = None
-    gmail_sort_keywords_talent: str | None = None
-    gmail_sort_keywords_project: str | None = None
     ai_assist_enabled: bool | None = None
     ai_judgement_top_n: int | None = Field(None, ge=1, le=20)
     own_company_name: str | None = None
@@ -89,18 +81,81 @@ class EmailDetail(BaseModel):
     body_text: str
 
 
-class EmailReclassifyRequest(BaseModel):
-    """判別不能メールを人材 / 案件へ手動振り分けする。"""
 
-    email_type: Literal["talent", "project"]
-
-
-class EmailReclassifyResponse(BaseModel):
-    id: str
-    email_type: str
-    label: str
+class BatchRunResponse(BaseModel):
     status: str
+    job: str
     message: str
+    job_id: str | None = None
+
+
+class RunningBatchJobResponse(BaseModel):
+    pid: int
+    job: str
+    job_label: str
+
+
+class BatchRunningResponse(BaseModel):
+    running: bool = False
+    jobs: list[RunningBatchJobResponse] = Field(default_factory=list)
+
+
+class BatchStopResponse(BaseModel):
+    stopped: bool
+    killed_count: int
+    jobs: list[RunningBatchJobResponse] = Field(default_factory=list)
+    message: str
+
+
+class PurgeIngestResponse(BaseModel):
+    deleted_emails: int
+    deleted_talents: int
+    deleted_projects: int
+    deleted_matches: int
+    deleted_match_runs: int
+    deleted_outreach_messages: int
+    deleted_outreach_replies: int
+    deleted_talent_skill_sheets: int
+    message: str
+
+
+class PipelineStepProgressResponse(BaseModel):
+    id: str
+    label: str
+    status: Literal["pending", "running", "completed", "failed"] = "pending"
+    progress_percent: int = 0
+    elapsed_seconds: int = 0
+    eta_seconds: int | None = None
+    eta_label: str | None = None
+    detail: str | None = None
+    weight: float = 0.0
+
+
+class PipelineProgressResponse(BaseModel):
+    """メール取込パイプラインの進捗。"""
+
+    job_id: str
+    status: Literal["not_found", "running", "completed", "failed"] = "not_found"
+    phase: str = "starting"
+    phase_label: str = "準備中"
+    current_step: int = 0
+    total_steps: int = 4
+    progress_percent: int = 0
+    processed_messages: int = 0
+    total_messages: int | None = None
+    ingested: int = 0
+    skipped: int = 0
+    failed: int = 0
+    started_at: str | None = None
+    updated_at: str | None = None
+    elapsed_seconds: int = 0
+    eta_seconds: int | None = None
+    eta_label: str | None = None
+    total_estimated_seconds: int | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    detail: str | None = None
+    steps: list[PipelineStepProgressResponse] = []
 
 
 class TalentListItem(BaseModel):
@@ -197,7 +252,7 @@ class DashboardDailyPoint(BaseModel):
     project_proposed: int = 0  # 案件メール・人材提案済み
     talent_unproposed: int = 0  # 人材メール・案件未提案
     talent_proposed: int = 0  # 人材メール・案件提案済み
-    emails_other: int = 0  # 振り分け不可など
+    emails_other: int = 0  # その他（unknown 等）
     proposals_project_offer: int = 0  # 案件提案（talent_proposal）
     proposals_talent_offer: int = 0  # 人材提案（project_proposal）
 
@@ -237,6 +292,12 @@ class DashboardResponse(BaseModel):
     talent_count: int
     project_count: int
     pending_email_count: int
+    gmail_ingest_talent_label: str = ""
+    gmail_ingest_project_label: str = ""
+    gmail_ingest_talent_count: int | None = None
+    gmail_ingest_project_count: int | None = None
+    gmail_ingest_talent_count_capped: bool = False
+    gmail_ingest_project_count_capped: bool = False
     # 送信済み提案メール（全期間）
     talent_proposal_sent_count: int = 0  # 案件提案（talent_proposal）
     project_proposal_sent_count: int = 0  # 要員提案（project_proposal）
@@ -264,17 +325,3 @@ class DashboardResponse(BaseModel):
     by_company: list[DashboardCompanyIngest] = []
     funnel: DashboardFunnel = DashboardFunnel()
     ok_by_score_band: list[DashboardScoreBandOk] = []
-
-
-class DashboardSortQueueResponse(BaseModel):
-    """振り分け対象ラベル（gmail_sort_source_label）の Gmail 件数。"""
-
-    label: str
-    count: int | None = None
-    capped: bool = False
-    cached: bool = False
-    fetched_at: str | None = None
-    expires_at: str | None = None
-    cache_ttl_seconds: int = 900
-    error_code: str | None = None
-    error_message: str | None = None

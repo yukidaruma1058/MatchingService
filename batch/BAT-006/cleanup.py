@@ -16,11 +16,11 @@ from __future__ import annotations
 
 import logging
 import time
-import uuid
 from dataclasses import dataclass, field
 
 from cleanup_db import delete_expired_ingest_data, load_retention_days
 
+from app.batch_job_id import resolve_batch_job_id
 from app.config import Settings, settings
 from app.db_bootstrap import create_session_factory, ensure_schema
 from app.logging_util import get_batch_logger, log_event
@@ -46,7 +46,7 @@ class IngestDataCleanupBatch:
     def __init__(self, cfg: Settings | None = None) -> None:
         self.cfg = cfg or settings
         self.logger = get_batch_logger()
-        self.job_id = f"job_{uuid.uuid4().hex[:12]}"
+        self.job_id = resolve_batch_job_id(default_prefix="job")
 
     def run(self) -> CleanupBatchStats:
         started = time.perf_counter()

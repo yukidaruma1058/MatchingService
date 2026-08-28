@@ -29,6 +29,8 @@ class MatchRunCreateRequest(BaseModel):
     trigger: str = "manual"
     ai_judgement_top_n: int | None = Field(default=None, ge=1, le=20)
     force: bool = False
+    talent_id: str | None = None
+    project_id: str | None = None
 
 
 class MatchRunResponse(BaseModel):
@@ -88,16 +90,44 @@ def _to_run_response(row: MatchRun) -> MatchRunResponse:
     )
 
 
+def _parse_optional_uuid(raw: str | None, *, field_name: str) -> UUID | None:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    try:
+        return UUID(text)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "ERR-0001", "error_message": f"不正な {field_name} です。"},
+        ) from exc
+
+
 @router.post("", response_model=MatchRunResponse)
 def create_match_run(body: MatchRunCreateRequest | None = None) -> MatchRunResponse:
     """ルールスコア採点（BAT-003）を実行する。
 
-    force=true のときのみ全件強制再採点。それ以外は増分。
+    force=true かつ talent_id/project_id なしのときのみ全件強制再採点。
+    talent_id または project_id を付けると 1:n（相手側は全件）で採点する。
     """
     force = bool(body and body.force)
-    extra_env = {"MATCH_FORCE_RESCORE": "1"} if force else None
+    talent_id = _parse_optional_uuid(body.talent_id if body else None, field_name="talent_id")
+    project_id = _parse_optional_uuid(body.project_id if body else None, field_name="project_id")
+    extra_env: dict[str, str] = {}
+    if force:
+        extra_env["MATCH_FORCE_RESCORE"] = "1"
+    if talent_id is not None:
+        extra_env["MATCH_TALENT_IDS"] = str(talent_id)
+    if project_id is not None:
+        extra_env["MATCH_PROJECT_IDS"] = str(project_id)
+    scoped = talent_id is not None or project_id is not None
+    timeout_seconds = 1800 if force and not scoped else 600
     try:
-        result = run_batch_job("match", timeout_seconds=1800 if force else 600, extra_env=extra_env)
+        result = run_batch_job(
+            "match",
+            timeout_seconds=timeout_seconds,
+            extra_env=extra_env or None,
+        )
     except FileNotFoundError as exc:
         raise HTTPException(
             status_code=500,

@@ -1,7 +1,7 @@
 """Gmail API 連携クライアント（バッチ共通）。
 
 OAuth 2.0 で認証し、メール一覧取得・本文取得・ラベル付け替えを行う。
-BAT-001（振り分け）や将来の BAT-002（取込）・BAT-005（送信同期）から利用する。
+BAT-002（取込）・BAT-007/008/009（送信・返信同期）から利用する。
 """
 
 from __future__ import annotations
@@ -207,7 +207,7 @@ class GmailClient:
         add_label_names: list[str],
         remove_label_names: list[str],
     ) -> None:
-        """メールのラベルを追加・削除する（BAT-001 の振り分けで使用）。
+        """メールのラベルを追加・削除する（取込・提案で使用）。
 
         追加側は未作成なら作成する。削除側は未作成ラベルは無視する。
         """
@@ -231,7 +231,7 @@ class GmailClient:
             raise GmailConfigError("ERR-0021", f"Failed to modify Gmail labels: {message_id}") from exc
 
     def has_any_label(self, label_ids: list[str], label_names: list[str]) -> bool:
-        """メールが指定ラベルのいずれかを既に持っているか判定する（再振り分け防止）。"""
+        """メールが指定ラベルのいずれかを既に持っているか判定する（再処理防止）。"""
         wanted = {self.label_id(name) for name in label_names}
         return any(label_id in wanted for label_id in label_ids)
 

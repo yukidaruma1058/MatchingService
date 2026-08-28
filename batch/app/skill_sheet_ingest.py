@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+import threading
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -12,7 +13,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.drive_client import XLSX_MIME, DriveClient
+from app.drive_client import SKILL_SHEET_ROOT_NAME, XLSX_MIME, DriveClient
 from app.gmail_client import GmailClient, GmailConfigError
 from app.logging_util import log_error_event, log_event
 from app.models import Company, Talent, TalentSkillSheet
@@ -27,6 +28,9 @@ from app.skill_sheet_names import (
     spreadsheet_drive_filename,
 )
 
+# スキルシート取込の並列度（Gmail/Drive API 負荷を抑えるため控えめ）
+SKILL_SHEET_CONCURRENCY = 2
+
 
 @dataclass
 class GmailAttachmentMeta:
@@ -34,6 +38,65 @@ class GmailAttachmentMeta:
     filename: str
     mime_type: str
     size: int = 0
+
+
+@dataclass
+class SkillSheetDriveContext:
+    """Drive 接続とフォルダ ID をバッチ内で使い回す。"""
+
+    drive: DriveClient
+    root_folder_id: str
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _skill_root_id: str | None = field(default=None, init=False, repr=False)
+    _company_folders: dict[str, str] = field(default_factory=dict, init=False, repr=False)
+
+    def company_folder_id(self, company_name: str) -> str:
+        """root/スキルシート/{会社名} のフォルダ ID（キャッシュ付き）。"""
+        with self._lock:
+            cached = self._company_folders.get(company_name)
+            if cached:
+                return cached
+            if self._skill_root_id is None:
+                self._skill_root_id = self.drive.ensure_child_folder(
+                    self.root_folder_id, SKILL_SHEET_ROOT_NAME
+                )
+            folder_id = self.drive.ensure_child_folder(self._skill_root_id, company_name)
+            self._company_folders[company_name] = folder_id
+            return folder_id
+
+    def save_bytes(
+        self,
+        *,
+        folder_id: str,
+        filename: str,
+        mime_type: str,
+        data: bytes,
+        existing_file_id: str | None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return _save_bytes_to_drive(
+                self.drive,
+                folder_id=folder_id,
+                filename=filename,
+                mime_type=mime_type,
+                data=data,
+                existing_file_id=existing_file_id,
+            )
+
+    def export_spreadsheet_xlsx(self, sheet_id: str) -> bytes:
+        with self._lock:
+            return self.drive.export_spreadsheet_xlsx(sheet_id)
+
+
+def connect_skill_sheet_drive(
+    *,
+    credentials_path: str,
+    token_path: str,
+    root_folder_id: str,
+) -> SkillSheetDriveContext:
+    drive = DriveClient(credentials_path, token_path)
+    drive.connect()
+    return SkillSheetDriveContext(drive=drive, root_folder_id=root_folder_id.strip())
 
 
 def list_message_attachments(client: GmailClient, message_id: str) -> list[GmailAttachmentMeta]:
@@ -135,15 +198,29 @@ def _save_bytes_to_drive(
     data: bytes,
     existing_file_id: str | None,
 ) -> dict[str, Any]:
-    if existing_file_id:
+    """Drive へ保存する。
+
+    existing_file_id がある場合は update のみ。失敗時は同名検索をせず新規 upload。
+    無い場合のみフォルダ内同名検索 → update / upload。
+    """
+    existing = (existing_file_id or "").strip()
+    if existing:
         try:
-            return drive.update_file_media(existing_file_id, mime_type=mime_type, data=data)
+            return drive.update_file_media(existing, mime_type=mime_type, data=data)
         except GmailConfigError:
-            pass
+            return drive.upload_file(folder_id, name=filename, mime_type=mime_type, data=data)
+
     found = drive.find_file_in_folder(folder_id, filename)
     if found:
         return drive.update_file_media(found, mime_type=mime_type, data=data)
     return drive.upload_file(folder_id, name=filename, mime_type=mime_type, data=data)
+
+
+def _apply_web_view_link(row: TalentSkillSheet, uploaded: dict[str, Any]) -> None:
+    """upload/update 応答の webViewLink のみ使う（追加の files.get はしない）。"""
+    link = uploaded.get("webViewLink")
+    if link:
+        row.web_view_link = str(link)
 
 
 def ingest_talent_skill_sheets(
@@ -157,10 +234,12 @@ def ingest_talent_skill_sheets(
     root_folder_id: str,
     logger: logging.Logger,
     job_id: str,
+    drive_context: SkillSheetDriveContext | None = None,
+    gmail_lock: threading.Lock | None = None,
 ) -> int:
     """人材のスキルシート候補を共有ドライブへ保存する。戻り値は処理件数。"""
     folder_id_setting = (root_folder_id or "").strip()
-    if not folder_id_setting:
+    if not folder_id_setting and drive_context is None:
         log_event(
             logger,
             logging.WARNING,
@@ -174,25 +253,29 @@ def ingest_talent_skill_sheets(
         )
         return 0
 
-    drive = DriveClient(str(gmail.credentials_path), str(gmail.token_path))
-    try:
-        drive.connect()
-    except GmailConfigError as exc:
-        log_error_event(
-            logger,
-            event="gmail_ingest.skill_sheet_drive_unavailable",
-            error_code=exc.error_code,
-            detail=exc.message,
-            operation="スキルシート Drive接続",
-            method_name="ingest_talent_skill_sheets",
-            job_id=job_id,
-            function_id="BAT-002",
-        )
-        return 0
+    if drive_context is None:
+        try:
+            drive_context = connect_skill_sheet_drive(
+                credentials_path=str(gmail.credentials_path),
+                token_path=str(gmail.token_path),
+                root_folder_id=folder_id_setting,
+            )
+        except GmailConfigError as exc:
+            log_error_event(
+                logger,
+                event="gmail_ingest.skill_sheet_drive_unavailable",
+                error_code=exc.error_code,
+                detail=exc.message,
+                operation="スキルシート Drive接続",
+                method_name="ingest_talent_skill_sheets",
+                job_id=job_id,
+                function_id="BAT-002",
+            )
+            return 0
 
     company = company_folder_name(resolve_talent_company_name(session, talent))
     try:
-        company_folder_id = drive.ensure_skill_sheet_company_folder(folder_id_setting, company)
+        company_folder_id = drive_context.company_folder_id(company)
     except GmailConfigError as exc:
         log_error_event(
             logger,
@@ -208,7 +291,11 @@ def ingest_talent_skill_sheets(
 
     processed = 0
     try:
-        attachments = list_message_attachments(gmail, gmail_message_id)
+        if gmail_lock is None:
+            attachments = list_message_attachments(gmail, gmail_message_id)
+        else:
+            with gmail_lock:
+                attachments = list_message_attachments(gmail, gmail_message_id)
     except GmailConfigError as exc:
         log_error_event(
             logger,
@@ -242,10 +329,13 @@ def ingest_talent_skill_sheets(
             ext=ext,
         )
         try:
-            data = download_gmail_attachment(gmail, gmail_message_id, att.attachment_id)
+            if gmail_lock is None:
+                data = download_gmail_attachment(gmail, gmail_message_id, att.attachment_id)
+            else:
+                with gmail_lock:
+                    data = download_gmail_attachment(gmail, gmail_message_id, att.attachment_id)
             mime = att.mime_type or "application/octet-stream"
-            uploaded = _save_bytes_to_drive(
-                drive,
+            uploaded = drive_context.save_bytes(
                 folder_id=company_folder_id,
                 filename=filename,
                 mime_type=mime,
@@ -259,7 +349,7 @@ def ingest_talent_skill_sheets(
             row.size_bytes = len(data)
             row.access_status = "ok"
             row.error_message = None
-            row.web_view_link = uploaded.get("webViewLink") or drive.get_web_view_link(row.drive_file_id)
+            _apply_web_view_link(row, uploaded)
             row.updated_at = datetime.now().astimezone()
             try:
                 extract_and_apply_to_row(row, data)
@@ -295,9 +385,8 @@ def ingest_talent_skill_sheets(
         )
         filename = spreadsheet_drive_filename(display_name=talent.display_name, talent_id=talent.id)
         try:
-            data = drive.export_spreadsheet_xlsx(sheet_id)
-            uploaded = _save_bytes_to_drive(
-                drive,
+            data = drive_context.export_spreadsheet_xlsx(sheet_id)
+            uploaded = drive_context.save_bytes(
                 folder_id=company_folder_id,
                 filename=filename,
                 mime_type=XLSX_MIME,
@@ -311,7 +400,7 @@ def ingest_talent_skill_sheets(
             row.size_bytes = len(data)
             row.access_status = "ok"
             row.error_message = None
-            row.web_view_link = uploaded.get("webViewLink") or drive.get_web_view_link(row.drive_file_id)
+            _apply_web_view_link(row, uploaded)
             row.updated_at = datetime.now().astimezone()
             try:
                 extract_and_apply_to_row(row, data)

@@ -1,4 +1,4 @@
-"""Gmail ラベル設定の読込（BAT-001 / BAT-002 共通）。"""
+"""Gmail ラベル設定の読込（BAT-002 取込・提案・返信同期で共通）。"""
 
 from __future__ import annotations
 
@@ -12,15 +12,15 @@ from app.models import SystemSetting
 
 
 @dataclass(frozen=True)
-class SortSettings:
-    """BAT-001 振り分け設定。"""
+class GmailLabelSettings:
+    """Gmail 上の人材 / 案件ラベル（設定画面で指定）。"""
 
-    source_label: str
     talent_label: str
     project_label: str
-    unknown_label: str
-    talent_keywords: str
-    project_keywords: str
+
+
+# 後方互換の別名
+SortSettings = GmailLabelSettings
 
 
 @dataclass(frozen=True)
@@ -63,27 +63,28 @@ def reply_label_for(base_label: str) -> str:
     return f"{base}返信"
 
 
-def load_sort_settings(session: Session, cfg: Settings) -> SortSettings:
+def load_gmail_label_settings(session: Session, cfg: Settings) -> GmailLabelSettings:
     db_values = _load_db_values(session)
     talent_label = _pick(db_values, "gmail_sort_label_talent", cfg.gmail_sort_label_talent or cfg.gmail_label_talent)
     project_label = _pick(db_values, "gmail_sort_label_project", cfg.gmail_sort_label_project or cfg.gmail_label_project)
-    return SortSettings(
-        source_label=_pick(db_values, "gmail_sort_source_label", cfg.gmail_sort_source_label),
+    return GmailLabelSettings(
         talent_label=talent_label,
         project_label=project_label,
-        unknown_label=_pick(db_values, "gmail_sort_unknown_label", cfg.gmail_sort_unknown_label),
-        talent_keywords=_pick(db_values, "gmail_sort_keywords_talent", cfg.gmail_sort_keywords_talent),
-        project_keywords=_pick(db_values, "gmail_sort_keywords_project", cfg.gmail_sort_keywords_project),
     )
 
 
+def load_sort_settings(session: Session, cfg: Settings) -> GmailLabelSettings:
+    """後方互換。load_gmail_label_settings と同じ。"""
+    return load_gmail_label_settings(session, cfg)
+
+
 def load_ingest_settings(session: Session, cfg: Settings) -> IngestSettings:
-    sort_settings = load_sort_settings(session, cfg)
+    label_settings = load_gmail_label_settings(session, cfg)
     return IngestSettings(
-        talent_label=sort_settings.talent_label,
-        project_label=sort_settings.project_label,
-        processed_talent_label=processed_label_for(sort_settings.talent_label),
-        processed_project_label=processed_label_for(sort_settings.project_label),
+        talent_label=label_settings.talent_label,
+        project_label=label_settings.project_label,
+        processed_talent_label=processed_label_for(label_settings.talent_label),
+        processed_project_label=processed_label_for(label_settings.project_label),
     )
 
 

@@ -4,12 +4,8 @@ export type GmailAuthStatus = "connected" | "disconnected" | "expired";
 
 export type SettingsPayload = {
   ingest_data_retention_days: number;
-  gmail_sort_source_label: string;
   gmail_sort_label_talent: string;
   gmail_sort_label_project: string;
-  gmail_sort_unknown_label: string;
-  gmail_sort_keywords_talent: string;
-  gmail_sort_keywords_project: string;
   ai_assist_enabled: boolean;
   ai_judgement_top_n: number;
   own_company_name: string;
@@ -35,12 +31,8 @@ export type SettingsUpdatePayload = Partial<
   Pick<
     SettingsPayload,
     | "ingest_data_retention_days"
-    | "gmail_sort_source_label"
     | "gmail_sort_label_talent"
     | "gmail_sort_label_project"
-    | "gmail_sort_unknown_label"
-    | "gmail_sort_keywords_talent"
-    | "gmail_sort_keywords_project"
     | "ai_assist_enabled"
     | "ai_judgement_top_n"
     | "own_company_name"
@@ -66,12 +58,8 @@ export async function fetchSettings(): Promise<SettingsPayload> {
   const data = (await response.json()) as Partial<SettingsPayload>;
   return {
     ingest_data_retention_days: data.ingest_data_retention_days ?? 0,
-    gmail_sort_source_label: data.gmail_sort_source_label ?? "SES未振り分け",
     gmail_sort_label_talent: data.gmail_sort_label_talent ?? "SES人材紹介",
     gmail_sort_label_project: data.gmail_sort_label_project ?? "SES案件配信",
-    gmail_sort_unknown_label: data.gmail_sort_unknown_label ?? "SES要確認",
-    gmail_sort_keywords_talent: data.gmail_sort_keywords_talent ?? "人材\n要員\nスキルシート\nご紹介",
-    gmail_sort_keywords_project: data.gmail_sort_keywords_project ?? "案件\n募集\n開発\nお問い合わせ",
     ai_assist_enabled: data.ai_assist_enabled ?? false,
     ai_judgement_top_n: data.ai_judgement_top_n ?? 5,
     own_company_name: data.own_company_name ?? "",
@@ -237,6 +225,17 @@ export function formatGmailCheckedAt(iso: string | null): string {
   return date.toLocaleString("ja-JP");
 }
 
+export function formatReceivedDate(iso: string | null | undefined): string {
+  if (!iso) {
+    return "-";
+  }
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return iso;
+  }
+  return date.toLocaleDateString("ja-JP");
+}
+
 export class BatchRunError extends Error {
   errorCode: string;
   errorMessage: string;
@@ -249,8 +248,157 @@ export class BatchRunError extends Error {
   }
 }
 
-export async function runGmailPipelineBatch(): Promise<{ status: string; job: string; message: string }> {
-  return runBatchJob("/api/batches/gmail-pipeline", "メール振り分け・取込・ルール採点の実行に失敗しました");
+export type BatchStartDto = {
+  status: string;
+  job: string;
+  message: string;
+  job_id?: string | null;
+};
+
+export type PipelineStepProgressDto = {
+  id: string;
+  label: string;
+  status: "pending" | "running" | "completed" | "failed";
+  progress_percent: number;
+  elapsed_seconds: number;
+  eta_seconds: number | null;
+  eta_label: string | null;
+  detail: string | null;
+  weight: number;
+};
+
+export type PipelineProgressDto = {
+  job_id: string;
+  status: "not_found" | "running" | "completed" | "failed";
+  phase: string;
+  phase_label: string;
+  current_step: number;
+  total_steps: number;
+  progress_percent: number;
+  processed_messages: number;
+  total_messages: number | null;
+  ingested: number;
+  skipped: number;
+  failed: number;
+  started_at: string | null;
+  updated_at: string | null;
+  elapsed_seconds: number;
+  eta_seconds: number | null;
+  eta_label: string | null;
+  total_estimated_seconds: number | null;
+  error_code: string | null;
+  error_message: string | null;
+  detail: string | null;
+  steps: PipelineStepProgressDto[];
+};
+
+export async function runGmailPipelineBatch(): Promise<BatchStartDto> {
+  const response = await fetch(`${API_BASE_URL}/api/batches/gmail-pipeline`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    try {
+      const body = (await response.json()) as {
+        detail?: string | { error_code?: string; error_message?: string };
+      };
+      const detail = body.detail;
+      if (detail && typeof detail === "object" && detail.error_code && detail.error_message) {
+        throw new BatchRunError(detail.error_code, detail.error_message);
+      }
+      if (typeof detail === "string" && detail) {
+        throw new BatchRunError("ERR-0030", detail);
+      }
+    } catch (error) {
+      if (error instanceof BatchRunError) {
+        throw error;
+      }
+    }
+    throw new BatchRunError("ERR-0030", "メール取込・ルール採点の開始に失敗しました");
+  }
+  return response.json() as Promise<BatchStartDto>;
+}
+
+export async function fetchGmailPipelineProgress(jobId?: string): Promise<PipelineProgressDto> {
+  const query = jobId ? `?job_id=${encodeURIComponent(jobId)}` : "";
+  const response = await fetch(`${API_BASE_URL}/api/batches/gmail-pipeline/progress${query}`);
+  if (!response.ok) {
+    throw new Error("メール取込の進捗取得に失敗しました");
+  }
+  return response.json() as Promise<PipelineProgressDto>;
+}
+
+export type RunningBatchJobDto = {
+  pid: number;
+  job: string;
+  job_label: string;
+};
+
+export type BatchRunningDto = {
+  running: boolean;
+  jobs: RunningBatchJobDto[];
+};
+
+export type BatchStopDto = {
+  stopped: boolean;
+  killed_count: number;
+  jobs: RunningBatchJobDto[];
+  message: string;
+};
+
+export async function fetchRunningBatchJobs(): Promise<BatchRunningDto> {
+  const response = await fetch(`${API_BASE_URL}/api/batches/running`);
+  if (!response.ok) {
+    throw new Error("実行中バッチの取得に失敗しました");
+  }
+  return response.json() as Promise<BatchRunningDto>;
+}
+
+export async function stopRunningBatchJobs(): Promise<BatchStopDto> {
+  const response = await fetch(`${API_BASE_URL}/api/batches/stop`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error("バッチ処理の停止に失敗しました");
+  }
+  return response.json() as Promise<BatchStopDto>;
+}
+
+export type PurgeIngestDto = {
+  deleted_emails: number;
+  deleted_talents: number;
+  deleted_projects: number;
+  deleted_matches: number;
+  deleted_match_runs: number;
+  deleted_outreach_messages: number;
+  deleted_outreach_replies: number;
+  deleted_talent_skill_sheets: number;
+  message: string;
+};
+
+export async function purgeAllIngestData(): Promise<PurgeIngestDto> {
+  const response = await fetch(`${API_BASE_URL}/api/batches/purge-ingest-data`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    try {
+      const body = (await response.json()) as {
+        detail?: string | { error_code?: string; error_message?: string };
+      };
+      const detail = body.detail;
+      if (detail && typeof detail === "object" && detail.error_code && detail.error_message) {
+        throw new BatchRunError(detail.error_code, detail.error_message);
+      }
+      if (typeof detail === "string" && detail) {
+        throw new BatchRunError("ERR-0030", detail);
+      }
+    } catch (error) {
+      if (error instanceof BatchRunError) {
+        throw error;
+      }
+    }
+    throw new BatchRunError("ERR-0030", "取込データの全削除に失敗しました");
+  }
+  return response.json() as Promise<PurgeIngestDto>;
 }
 
 export async function runIngestCleanupBatch(): Promise<{ status: string; job: string; message: string }> {
@@ -267,11 +415,19 @@ export type MatchRunDto = {
   finished_at: string | null;
 };
 
-export async function runMatchScoreBatch(options?: { force?: boolean }): Promise<MatchRunDto> {
+export async function runMatchScoreBatch(options?: {
+  force?: boolean;
+  talentId?: string;
+  projectId?: string;
+}): Promise<MatchRunDto> {
   const response = await fetch(`${API_BASE_URL}/api/match-runs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ force: Boolean(options?.force) }),
+    body: JSON.stringify({
+      force: Boolean(options?.force),
+      talent_id: options?.talentId || undefined,
+      project_id: options?.projectId || undefined,
+    }),
   });
   if (!response.ok) {
     try {
@@ -826,6 +982,12 @@ export type DashboardDto = {
   talent_count: number;
   project_count: number;
   pending_email_count: number;
+  gmail_ingest_talent_label?: string;
+  gmail_ingest_project_label?: string;
+  gmail_ingest_talent_count?: number | null;
+  gmail_ingest_project_count?: number | null;
+  gmail_ingest_talent_count_capped?: boolean;
+  gmail_ingest_project_count_capped?: boolean;
   talent_proposal_sent_count: number;
   project_proposal_sent_count: number;
   unscored_talent_count?: number;
@@ -872,35 +1034,6 @@ export async function fetchDashboard(options?: {
   return response.json();
 }
 
-export type DashboardSortQueueDto = {
-  label: string;
-  count: number | null;
-  capped: boolean;
-  cached: boolean;
-  fetched_at: string | null;
-  expires_at: string | null;
-  cache_ttl_seconds: number;
-  error_code: string | null;
-  error_message: string | null;
-};
-
-export async function fetchDashboardSortQueue(options?: {
-  refresh?: boolean;
-}): Promise<DashboardSortQueueDto> {
-  const params = new URLSearchParams();
-  if (options?.refresh) {
-    params.set("refresh", "true");
-  }
-  const query = params.toString();
-  const response = await fetch(
-    `${API_BASE_URL}/api/dashboard/sort-queue${query ? `?${query}` : ""}`,
-  );
-  if (!response.ok) {
-    throw new Error("振り分け待ち件数の取得に失敗しました");
-  }
-  return response.json();
-}
-
 export async function fetchEmails(): Promise<EmailDto[]> {
   const response = await fetch(`${API_BASE_URL}/api/emails`);
   if (!response.ok) {
@@ -925,36 +1058,6 @@ export async function fetchEmailDetail(emailId: string): Promise<EmailDetailDto>
   const response = await fetch(`${API_BASE_URL}/api/emails/${emailId}`);
   if (!response.ok) {
     throw new Error("メール詳細の取得に失敗しました");
-  }
-  return response.json();
-}
-
-export async function reclassifyEmail(
-  emailId: string,
-  emailType: "talent" | "project",
-): Promise<{ id: string; email_type: string; label: string; status: string; message: string }> {
-  const response = await fetch(`${API_BASE_URL}/api/emails/${emailId}/reclassify`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email_type: emailType }),
-  });
-  if (!response.ok) {
-    let code = "ERR-0030";
-    let message = "手動振り分けに失敗しました";
-    try {
-      const payload = (await response.json()) as {
-        detail?: string | { error_code?: string; error_message?: string };
-      };
-      if (typeof payload.detail === "string") {
-        message = payload.detail;
-      } else if (payload.detail && typeof payload.detail === "object") {
-        if (payload.detail.error_code) code = payload.detail.error_code;
-        if (payload.detail.error_message) message = payload.detail.error_message;
-      }
-    } catch {
-      /* keep default */
-    }
-    throw new BatchRunError(code, message);
   }
   return response.json();
 }

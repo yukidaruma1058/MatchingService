@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
@@ -91,6 +92,48 @@ class ReadLastBatchErrorTests(unittest.TestCase):
             assert got is not None
             self.assertIn("ルール採点", got["error_message"])
             self.assertNotIn("65535", got["error_message"])
+
+
+class BatchJobProcessTests(unittest.TestCase):
+    def test_parse_batch_job_from_argv(self) -> None:
+        self.assertEqual(
+            batch_runner.parse_batch_job_from_argv(["python", "-m", "app.main", "pipeline"]),
+            "pipeline",
+        )
+        self.assertEqual(
+            batch_runner.parse_batch_job_from_argv(["python", "-m", "app.main", "match"]),
+            "match",
+        )
+        self.assertIsNone(batch_runner.parse_batch_job_from_argv(["uvicorn", "app.main:app"]))
+
+    def test_batch_job_label(self) -> None:
+        self.assertEqual(batch_runner.batch_job_label("cleanup"), "取込データ削除")
+        self.assertEqual(batch_runner.batch_job_label("unknown_job"), "unknown_job")
+
+    def test_cancel_orphaned_pipeline_jobs(self) -> None:
+        started = datetime(2026, 8, 28, 10, 0, 0, tzinfo=UTC)
+        job_id = "pipeline_orphan111"
+        rows = [
+            {
+                "timestamp": started.isoformat(),
+                "job_id": job_id,
+                "event": "batch.pipeline.started",
+                "extra": {"steps": ["ingest"]},
+            },
+        ]
+        with TemporaryDirectory() as tmp:
+            log_path = Path(tmp) / "batch.log"
+            log_path.write_text(
+                "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n",
+                encoding="utf-8",
+            )
+            with mock.patch("app.pipeline_progress.BATCH_LOG_PATH", log_path):
+                with mock.patch.object(batch_runner, "BATCH_LOG_PATH", log_path):
+                    with mock.patch.object(batch_runner, "is_batch_job_running", return_value=False):
+                        cancelled = batch_runner.cancel_orphaned_pipeline_jobs()
+            self.assertEqual(cancelled, [job_id])
+            text = log_path.read_text(encoding="utf-8")
+            self.assertIn('"status": "cancelled"', text)
 
 
 if __name__ == "__main__":

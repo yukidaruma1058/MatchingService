@@ -227,7 +227,7 @@ def score_pair(
     full remote は commute_resolved に関わらず 10。
     外国籍不可・商流制限に抵触する場合は合計 0 点。
     """
-    from constraint_rules import hard_constraint_reject_reason, hard_reject_label
+    from app.constraint_rules import hard_constraint_reject_reason, hard_reject_label
 
     reject = hard_constraint_reject_reason(
         project_foreign_nationality_ng=bool(project_foreign_nationality_ng),

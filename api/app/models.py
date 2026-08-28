@@ -143,6 +143,7 @@ class Project(Base):
     interview_count: Mapped[int | None] = mapped_column(SmallInteger)
     headcount: Mapped[int | None] = mapped_column(SmallInteger)
     summary: Mapped[str | None] = mapped_column(Text)
+    source_company_name: Mapped[str | None] = mapped_column(String(255))
     proposal_cc_emails: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, server_default="[]")
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="open")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

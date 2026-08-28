@@ -11,6 +11,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.models import Email, Project, SystemSetting, Talent
+from app.ingest_dedup import find_project_by_business_key, find_talent_by_business_key
 from app.skill_catalog import ensure_skills_in_master
 
 
@@ -122,54 +123,63 @@ def upsert_talent_from_email(
     now = datetime.now().astimezone()
     skills = ensure_skills_in_master(session, data.get("skills") or [])
     proposal_cc = list(data.get("proposal_cc_emails") or [])
-    talent_id = uuid4()
-    stmt = insert(Talent).values(
-        id=talent_id,
-        email_id=email_id,
+    source_company_name = data.get("source_company_name")
+
+    existing = find_talent_by_business_key(
+        session,
         display_name=data["display_name"],
-        affiliation=data.get("affiliation"),
-        age=data.get("age"),
-        gender=data.get("gender"),
-        experience_years=data.get("experience_years"),
-        desired_rate=data.get("desired_rate"),
-        available_from=data.get("available_from"),
-        work_style=data.get("work_style"),
+        source_company_name=source_company_name,
         nearest_station=data.get("nearest_station"),
-        is_foreign_national=data.get("is_foreign_national"),
-        commerce_flow=data.get("commerce_flow"),
-        skills=skills,
-        source_company_name=data.get("source_company_name"),
-        summary=data.get("summary"),
-        proposal_cc_emails=proposal_cc,
-        status=status,
-        created_at=now,
-        updated_at=now,
     )
-    stmt = stmt.on_conflict_do_update(
-        index_elements=[Talent.email_id],
-        set_={
-            "display_name": data["display_name"],
-            "affiliation": data.get("affiliation"),
-            "age": data.get("age"),
-            "gender": data.get("gender"),
-            "experience_years": data.get("experience_years"),
-            "desired_rate": data.get("desired_rate"),
-            "available_from": data.get("available_from"),
-            "work_style": data.get("work_style"),
-            "nearest_station": data.get("nearest_station"),
-            "is_foreign_national": data.get("is_foreign_national"),
-            "commerce_flow": data.get("commerce_flow"),
-            "skills": skills,
-            "source_company_name": data.get("source_company_name"),
-            "summary": data.get("summary"),
-            "proposal_cc_emails": proposal_cc,
-            "status": status,
-            "updated_at": now,
-        },
+    if existing is not None:
+        existing.email_id = email_id
+        existing.display_name = data["display_name"]
+        existing.affiliation = data.get("affiliation")
+        existing.age = data.get("age")
+        existing.gender = data.get("gender")
+        existing.experience_years = data.get("experience_years")
+        existing.desired_rate = data.get("desired_rate")
+        existing.available_from = data.get("available_from")
+        existing.work_style = data.get("work_style")
+        existing.nearest_station = data.get("nearest_station")
+        existing.is_foreign_national = data.get("is_foreign_national")
+        existing.commerce_flow = data.get("commerce_flow")
+        existing.skills = skills
+        existing.source_company_name = source_company_name
+        existing.summary = data.get("summary")
+        existing.proposal_cc_emails = proposal_cc
+        existing.status = status
+        existing.updated_at = now
+        session.flush()
+        return existing.id
+
+    talent_id = uuid4()
+    session.add(
+        Talent(
+            id=talent_id,
+            email_id=email_id,
+            display_name=data["display_name"],
+            affiliation=data.get("affiliation"),
+            age=data.get("age"),
+            gender=data.get("gender"),
+            experience_years=data.get("experience_years"),
+            desired_rate=data.get("desired_rate"),
+            available_from=data.get("available_from"),
+            work_style=data.get("work_style"),
+            nearest_station=data.get("nearest_station"),
+            is_foreign_national=data.get("is_foreign_national"),
+            commerce_flow=data.get("commerce_flow"),
+            skills=skills,
+            source_company_name=source_company_name,
+            summary=data.get("summary"),
+            proposal_cc_emails=proposal_cc,
+            status=status,
+            created_at=now,
+            updated_at=now,
+        )
     )
-    session.execute(stmt)
-    existing = session.scalar(select(Talent.id).where(Talent.email_id == email_id))
-    return existing or talent_id
+    session.flush()
+    return talent_id
 
 
 def upsert_project_from_email(
@@ -182,53 +192,63 @@ def upsert_project_from_email(
     now = datetime.now().astimezone()
     required_skills = ensure_skills_in_master(session, data.get("required_skills") or [])
     proposal_cc = list(data.get("proposal_cc_emails") or [])
-    project_id = uuid4()
-    stmt = insert(Project).values(
-        id=project_id,
-        email_id=email_id,
-        project_code=data.get("project_code"),
+    source_company_name = data.get("source_company_name")
+
+    existing = find_project_by_business_key(
+        session,
         title=data["title"],
-        required_skills=required_skills,
-        rate_min=data.get("rate_min"),
-        rate_max=data.get("rate_max"),
-        location=data.get("location"),
-        work_style=data.get("work_style"),
-        working_hours=data.get("working_hours"),
-        start_date=data.get("start_date"),
-        foreign_nationality_ng=data.get("foreign_nationality_ng"),
-        commerce_flow_limit=data.get("commerce_flow_limit"),
-        settlement_range=data.get("settlement_range"),
-        interview_count=data.get("interview_count"),
-        headcount=data.get("headcount"),
-        summary=data.get("summary"),
-        proposal_cc_emails=proposal_cc,
-        status=status,
-        created_at=now,
-        updated_at=now,
+        source_company_name=source_company_name,
     )
-    stmt = stmt.on_conflict_do_update(
-        index_elements=[Project.email_id],
-        set_={
-            "project_code": data.get("project_code"),
-            "title": data["title"],
-            "required_skills": required_skills,
-            "rate_min": data.get("rate_min"),
-            "rate_max": data.get("rate_max"),
-            "location": data.get("location"),
-            "work_style": data.get("work_style"),
-            "working_hours": data.get("working_hours"),
-            "start_date": data.get("start_date"),
-            "foreign_nationality_ng": data.get("foreign_nationality_ng"),
-            "commerce_flow_limit": data.get("commerce_flow_limit"),
-            "settlement_range": data.get("settlement_range"),
-            "interview_count": data.get("interview_count"),
-            "headcount": data.get("headcount"),
-            "summary": data.get("summary"),
-            "proposal_cc_emails": proposal_cc,
-            "status": status,
-            "updated_at": now,
-        },
+    if existing is not None:
+        existing.email_id = email_id
+        existing.project_code = data.get("project_code")
+        existing.title = data["title"]
+        existing.required_skills = required_skills
+        existing.rate_min = data.get("rate_min")
+        existing.rate_max = data.get("rate_max")
+        existing.location = data.get("location")
+        existing.work_style = data.get("work_style")
+        existing.working_hours = data.get("working_hours")
+        existing.start_date = data.get("start_date")
+        existing.foreign_nationality_ng = data.get("foreign_nationality_ng")
+        existing.commerce_flow_limit = data.get("commerce_flow_limit")
+        existing.settlement_range = data.get("settlement_range")
+        existing.interview_count = data.get("interview_count")
+        existing.headcount = data.get("headcount")
+        existing.summary = data.get("summary")
+        existing.proposal_cc_emails = proposal_cc
+        existing.source_company_name = source_company_name
+        existing.status = status
+        existing.updated_at = now
+        session.flush()
+        return existing.id
+
+    project_id = uuid4()
+    session.add(
+        Project(
+            id=project_id,
+            email_id=email_id,
+            project_code=data.get("project_code"),
+            title=data["title"],
+            required_skills=required_skills,
+            rate_min=data.get("rate_min"),
+            rate_max=data.get("rate_max"),
+            location=data.get("location"),
+            work_style=data.get("work_style"),
+            working_hours=data.get("working_hours"),
+            start_date=data.get("start_date"),
+            foreign_nationality_ng=data.get("foreign_nationality_ng"),
+            commerce_flow_limit=data.get("commerce_flow_limit"),
+            settlement_range=data.get("settlement_range"),
+            interview_count=data.get("interview_count"),
+            headcount=data.get("headcount"),
+            summary=data.get("summary"),
+            proposal_cc_emails=proposal_cc,
+            source_company_name=source_company_name,
+            status=status,
+            created_at=now,
+            updated_at=now,
+        )
     )
-    session.execute(stmt)
-    existing = session.scalar(select(Project.id).where(Project.email_id == email_id))
-    return existing or project_id
+    session.flush()
+    return project_id

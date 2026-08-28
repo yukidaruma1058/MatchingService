@@ -1,24 +1,7 @@
-/** 設定画面のフォールバック初期値（entity モックは廃止）。 */
+/** 設定画面のフォールバック初期値（API 取得前の useState 初期値）。 */
 export const settings = {
-  autoMatch: true,
-  scoreThreshold: 70,
-  autoSend: false,
   ingestDataRetentionDays: 0,
-  sortSourceLabel: "SES未振り分け",
-  sortTalentLabel: "SES人材紹介",
-  sortProjectLabel: "SES案件配信",
-  sortUnknownLabel: "SES要確認",
-  sortKeywordsTalent: "人材\n要員\nスキルシート\nご紹介",
-  sortKeywordsProject: "案件\n募集\n開発\nお問い合わせ",
+  ingestTalentLabel: "SES人材紹介",
+  ingestProjectLabel: "SES案件配信",
   gmailAccount: null as string | null,
-  from: "",
 };
-
-export const scoreBands = [
-  { label: "0-10", count: 0 },
-  { label: "11-20", count: 0 },
-  { label: "21-30", count: 0 },
-  { label: "31-40", count: 0 },
-  { label: "41-50", count: 0 },
-  { label: "51-60", count: 0 },
-] as const;

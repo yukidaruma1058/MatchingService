@@ -25,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.ai_concurrency import map_parallel, resolve_ai_concurrency
+from app.batch_job_id import resolve_batch_job_id
 from app.config import Settings, settings
 from app.constraint_rules import (
     evaluate_match_hard_constraints,
@@ -89,6 +90,8 @@ class AiSettings(Protocol):
     cursor_api_key: str
     openai_api_key: str
     openai_model: str
+    anthropic_api_key: str
+    anthropic_model: str
 
 
 def _load_setting(session: Session, key: str, default: Any = None) -> Any:
@@ -279,7 +282,11 @@ def _judge_with_llm(
     )
 
     logger = get_batch_logger()
-    raw_text = _call_cursor(prompt, cfg, logger=logger) or _call_openai(prompt, cfg, logger=logger)
+    raw_text = (
+        _call_cursor(prompt, cfg, logger=logger)
+        or _call_openai(prompt, cfg, logger=logger)
+        or _call_claude(prompt, cfg, logger=logger)
+    )
     if not raw_text:
         fallback_score = max(0, min(100, score))
         return (
@@ -407,6 +414,60 @@ def _call_openai(prompt: str, cfg: AiSettings, *, logger: logging.Logger | None 
                 detail=str(exc),
                 operation="AI判定 OpenAI",
                 method_name="_call_openai",
+                job_id="ai_judge",
+                function_id="BAT-004",
+                module_name="BAT-004.ai_judge",
+            )
+        return None
+
+
+def _call_claude(prompt: str, cfg: AiSettings, *, logger: logging.Logger | None = None) -> str | None:
+    api_key = getattr(cfg, "anthropic_api_key", "") or ""
+    if not str(api_key).strip():
+        return None
+    try:
+        from app.claude_llm import call_claude_messages
+    except ImportError as exc:
+        if logger is not None:
+            log_error_event(
+                logger,
+                event="matching.ai_judge.claude_unavailable",
+                error_code="ERR-0030",
+                detail=str(exc),
+                operation="AI判定 Claude",
+                method_name="_call_claude",
+                job_id="ai_judge",
+                function_id="BAT-004",
+                module_name="BAT-004.ai_judge",
+            )
+        return None
+
+    try:
+        content = call_claude_messages(
+            api_key=str(api_key),
+            model=getattr(cfg, "anthropic_model", None),
+            system=(
+                "You are an SES matching evaluator. "
+                "recommendation_points must be reusable in both talent-proposal "
+                "and project-proposal emails (neutral fit appeal). "
+                "Reply with a single JSON object only: "
+                '{"ai_score": 0-100, "reason": "...", "recommendation_points": "..."}. '
+                "Do not wrap the JSON in Markdown fences."
+            ),
+            user=prompt,
+            max_tokens=2048,
+            temperature=0.2,
+        )
+        return content
+    except Exception as exc:  # noqa: BLE001
+        if logger is not None:
+            log_error_event(
+                logger,
+                event="matching.ai_judge.claude_failed",
+                error_code="ERR-0030",
+                detail=str(exc),
+                operation="AI判定 Claude",
+                method_name="_call_claude",
                 job_id="ai_judge",
                 function_id="BAT-004",
                 module_name="BAT-004.ai_judge",
@@ -571,7 +632,7 @@ def run_ai_judge_batch(
 ) -> AiJudgeStats:
     cfg = cfg or settings
     logger = get_batch_logger()
-    job_id = f"job_{uuid.uuid4().hex[:12]}"
+    job_id = resolve_batch_job_id(default_prefix="job")
     stats = AiJudgeStats()
     concurrency = resolve_ai_concurrency(getattr(cfg, "ai_concurrency", 3))
     started = time.perf_counter()

@@ -12,11 +12,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import Date, cast, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.config import settings as app_settings
 from app.db import load_settings
 from app.deps import get_db
-from app.gmail_client import GmailClient, GmailConfigError
-from app.gmail_credentials import ensure_gmail_credentials_file
+from app.gmail_ingest_queue import fetch_gmail_ingest_queue_counts
 from app.match_run_query import latest_completed_match_run
 from app.models import (
     Company,
@@ -36,13 +34,6 @@ from app.schemas import (
     DashboardFunnelConstraintLoss,
     DashboardResponse,
     DashboardScoreBandOk,
-    DashboardSortQueueResponse,
-)
-from app.setting_keys import DEFAULT_SETTINGS, SETTING_KEY_GMAIL_SORT_SOURCE_LABEL
-from app.sort_queue_cache import (
-    SortQueueCacheEntry,
-    get_cached_sort_queue,
-    set_cached_sort_queue,
 )
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -141,9 +132,9 @@ def get_dashboard(
 ) -> DashboardResponse:
     talent_count = session.scalar(select(func.count()).select_from(Talent)) or 0
     project_count = session.scalar(select(func.count()).select_from(Project)) or 0
-    pending_email_count = (
-        session.scalar(select(func.count()).select_from(Email).where(Email.status.in_(["pending", "failed"]))) or 0
-    )
+    db_settings = load_settings(session)
+    gmail_queue = fetch_gmail_ingest_queue_counts(db_settings)
+    pending_email_count = gmail_queue.pending_total
     talent_proposal_sent_count = (
         session.scalar(
             select(func.count())
@@ -329,6 +320,12 @@ def get_dashboard(
         talent_count=int(talent_count),
         project_count=int(project_count),
         pending_email_count=int(pending_email_count),
+        gmail_ingest_talent_label=gmail_queue.talent_label,
+        gmail_ingest_project_label=gmail_queue.project_label,
+        gmail_ingest_talent_count=gmail_queue.talent_count,
+        gmail_ingest_project_count=gmail_queue.project_count,
+        gmail_ingest_talent_count_capped=gmail_queue.talent_count_capped,
+        gmail_ingest_project_count_capped=gmail_queue.project_count_capped,
         talent_proposal_sent_count=int(talent_proposal_sent_count),
         project_proposal_sent_count=int(project_proposal_sent_count),
         unscored_talent_count=unscored_talent_count,
@@ -633,81 +630,3 @@ def _build_ok_by_score_band(
     ]
     rows.sort(key=lambda r: (-r.proposed_count, r.score_band))
     return rows
-
-
-def _sort_source_label(raw: dict) -> str:
-    value = raw.get(SETTING_KEY_GMAIL_SORT_SOURCE_LABEL)
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    default = DEFAULT_SETTINGS.get(SETTING_KEY_GMAIL_SORT_SOURCE_LABEL, "SES未振り分け")
-    return str(default)
-
-
-def _entry_to_response(entry: SortQueueCacheEntry, *, cached: bool) -> DashboardSortQueueResponse:
-    payload = entry.to_payload(cached=cached)
-    return DashboardSortQueueResponse(
-        label=str(payload["label"]),
-        count=None if entry.error_code else int(payload["count"]),
-        capped=bool(payload["capped"]),
-        cached=cached,
-        fetched_at=str(payload["fetched_at"]),
-        expires_at=str(payload["expires_at"]),
-        cache_ttl_seconds=int(payload["cache_ttl_seconds"]),
-        error_code=entry.error_code,
-        error_message=entry.error_message,
-    )
-
-
-@router.get("/sort-queue", response_model=DashboardSortQueueResponse)
-def get_sort_queue(
-    session: Session = Depends(get_db),
-    refresh: bool = Query(False, description="true のときキャッシュを無視して再取得"),
-) -> DashboardSortQueueResponse:
-    """振り分け対象ラベルの Gmail 件数を返す（15 分キャッシュ）。
-
-    ダッシュボード本体とは分離し、Gmail API 遅延がチャート表示を止めないようにする。
-    """
-    raw = load_settings(session)
-    label = _sort_source_label(raw)
-
-    if not refresh:
-        cached = get_cached_sort_queue()
-        if cached is not None and cached.label == label and cached.is_fresh():
-            return _entry_to_response(cached, cached=True)
-
-    fetched_at = datetime.now(UTC)
-
-    if not ensure_gmail_credentials_file(raw):
-        entry = SortQueueCacheEntry(
-            label=label,
-            count=0,
-            capped=False,
-            fetched_at=fetched_at,
-            error_code="ERR-0018",
-            error_message="Gmail が連携されていません。",
-        )
-        set_cached_sort_queue(entry)
-        return _entry_to_response(entry, cached=False)
-
-    client = GmailClient(str(app_settings.gmail_credentials_path), str(app_settings.gmail_token_path))
-    try:
-        client.connect()
-        count, capped = client.count_messages_with_label(label)
-        entry = SortQueueCacheEntry(
-            label=label,
-            count=count,
-            capped=capped,
-            fetched_at=fetched_at,
-        )
-    except GmailConfigError as exc:
-        entry = SortQueueCacheEntry(
-            label=label,
-            count=0,
-            capped=False,
-            fetched_at=fetched_at,
-            error_code=exc.error_code,
-            error_message=exc.message,
-        )
-
-    set_cached_sort_queue(entry)
-    return _entry_to_response(entry, cached=False)

@@ -22,6 +22,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.batch_job_id import resolve_batch_job_id
 from app.config import Settings, settings
 from app.db_bootstrap import create_session_factory, ensure_schema
 from app.gmail_client import GmailClient, GmailMessage
@@ -467,7 +468,7 @@ def run_reply_sync_batch(
 ) -> ReplySyncStats:
     cfg = cfg or settings
     logger = get_batch_logger()
-    job_id = f"job_{uuid.uuid4().hex[:12]}"
+    job_id = resolve_batch_job_id(default_prefix="job")
     stats = ReplySyncStats()
     sync_kind = _resolve_kind(kind)
 

@@ -33,6 +33,7 @@ from db import (
 )
 from scorer import is_full_remote, score_pair
 
+from app.batch_job_id import resolve_batch_job_id
 from app.config import Settings, settings
 from app.db_bootstrap import create_session_factory, ensure_schema
 from app.logging_util import get_batch_logger, log_error_event, log_event
@@ -144,7 +145,7 @@ class MatchScoreBatch:
             self.scope_project_ids = _parse_uuid_list(os.environ.get("MATCH_PROJECT_IDS"))
         if self.scope_talent_ids is None:
             self.scope_talent_ids = _parse_uuid_list(os.environ.get("MATCH_TALENT_IDS"))
-        self.job_id = f"job_{uuid.uuid4().hex[:12]}"
+        self.job_id = resolve_batch_job_id(default_prefix="job")
         self.logger = get_batch_logger()
 
     def run(self) -> tuple[UUID | None, MatchBatchStats]:
@@ -235,7 +236,9 @@ class MatchScoreBatch:
                     return None, stats
 
                 if self.force_rescore:
-                    match_run_id, stats = self._run_force_rescore(
+                    scoped = scoped_projects is not None or scoped_talents is not None
+                    runner = self._run_scoped_rescore if scoped else self._run_force_rescore
+                    match_run_id, stats = runner(
                         session,
                         stats=stats,
                         talents=talents,
@@ -431,6 +434,138 @@ class MatchScoreBatch:
             },
         )
         return match_run_id, stats
+
+    def _run_scoped_rescore(
+        self,
+        session,
+        *,
+        stats: MatchBatchStats,
+        talents,
+        projects,
+        talent_map,
+        project_map,
+        talent_company_names,
+        own_company_name: str | None,
+        top_n: int,
+        ai_assist: bool,
+    ) -> tuple[UUID | None, MatchBatchStats]:
+        """指定人材または案件だけを、直近 completed run 上で再採点する（他ペアは残す）。"""
+        from sqlalchemy import func, select
+
+        from app.models import Match
+
+        latest = list_latest_completed_match_run(session)
+        if latest is None:
+            latest = create_match_run(
+                session,
+                trigger=self.trigger,
+                top_n=top_n,
+                ai_assist_enabled=ai_assist,
+            )
+
+        pair_keys = [(t.id, p.id) for p in projects for t in talents]
+        key_set = set(pair_keys)
+        talent_ids = [t.id for t in talents]
+        project_ids = [p.id for p in projects]
+        existing_rows = list(
+            session.scalars(
+                select(Match).where(
+                    Match.match_run_id == latest.id,
+                    Match.talent_id.in_(talent_ids),
+                    Match.project_id.in_(project_ids),
+                )
+            ).all()
+        )
+        existing = {
+            (row.talent_id, row.project_id): row
+            for row in existing_rows
+            if (row.talent_id, row.project_id) in key_set
+        }
+        historical = list_latest_match_by_pair_keys(session, pair_keys=pair_keys)
+
+        insert_rows: list[dict[str, Any]] = []
+        updated: list = []
+        for talent in talents:
+            for project in projects:
+                result = score_pair(
+                    **_score_kwargs(
+                        talent,
+                        project,
+                        commute_resolved=False,
+                        own_company_name=own_company_name,
+                        talent_company_name=talent_company_names.get(talent.id),
+                    )
+                )
+                current = existing.get((talent.id, project.id))
+                if current is not None:
+                    update_match_score(
+                        session,
+                        match_id=current.id,
+                        score=result.score,
+                        score_band=result.score_band,
+                        breakdown=result.breakdown,
+                    )
+                    updated.append(current)
+                    stats.scored_count += 1
+                    continue
+                prior = historical.get((talent.id, project.id))
+                row: dict[str, Any] = {
+                    "talent_id": talent.id,
+                    "project_id": project.id,
+                    "score": result.score,
+                    "score_band": result.score_band,
+                    "score_breakdown": result.breakdown,
+                    "reused": False,
+                }
+                if prior is not None:
+                    row["ai_score"] = prior.ai_score
+                    row["reason"] = prior.reason
+                    row["recommendation_points"] = prior.recommendation_points
+                    row["ai_judged_at"] = prior.ai_judged_at
+                    row["is_candidate"] = bool(prior.is_candidate)
+                insert_rows.append(row)
+                stats.scored_count += 1
+
+        inserted = insert_matches(session, match_run_id=latest.id, rows=insert_rows) if insert_rows else []
+        newly_scored = [*updated, *inserted]
+        session.flush()
+        self._pass2_commute(
+            session,
+            stats=stats,
+            latest_run_id=latest.id,
+            newly_scored=newly_scored,
+            talent_map=talent_map,
+            project_map=project_map,
+            talent_company_names=talent_company_names,
+            own_company_name=own_company_name,
+            top_n=top_n,
+        )
+        stats.match_count = int(
+            session.scalar(select(func.count()).select_from(Match).where(Match.match_run_id == latest.id))
+            or 0
+        )
+        finish_match_run(
+            session,
+            latest,
+            status="completed",
+            stats={
+                "talent_count": stats.talent_count,
+                "project_count": stats.project_count,
+                "match_count": stats.match_count,
+                "scored_count": stats.scored_count,
+                "reused_count": 0,
+                "top_n": top_n,
+                "commute_api_calls": stats.commute_api_calls,
+                "commute_cache_hits": stats.commute_cache_hits,
+                "commute_skipped_limit": stats.commute_skipped_limit,
+                "commute_skipped_remote": stats.commute_skipped_remote,
+                "google_routes_usage": get_monthly_usage(session),
+                "incremental": False,
+                "force_rescore": True,
+                "scoped": True,
+            },
+        )
+        return latest.id, stats
 
     def _run_force_rescore(
         self,

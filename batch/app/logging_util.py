@@ -27,7 +27,7 @@ class JsonLineFormatter(logging.Formatter):
             "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             "level": record.levelname,
             "service": getattr(record, "service", "batch"),
-            "function_id": getattr(record, "function_id", "BAT-001"),
+            "function_id": getattr(record, "function_id", "BATCH"),
             "module": getattr(record, "module_name", record.module),
             "method": getattr(record, "method_name", record.funcName),
             "operation": getattr(record, "operation", record.getMessage()),
@@ -78,8 +78,8 @@ def log_event(
     operation: str,
     method_name: str,
     job_id: str,
-    function_id: str = "BAT-001",
-    module_name: str = "BAT-001.gmail_sort",
+    function_id: str = "BATCH",
+    module_name: str = "app.main",
     **fields: Any,
 ) -> None:
     """共通ログスキーマに沿ったイベントログを 1 件出力する。"""
@@ -109,8 +109,8 @@ def log_error_event(
     detail: str = "",
     error_message: str | None = None,
     message: str | None = None,
-    function_id: str = "BAT-001",
-    module_name: str = "BAT-001.gmail_sort",
+    function_id: str = "BATCH",
+    module_name: str = "app.main",
     **fields: Any,
 ) -> None:
     """エラーコードと利用者向けメッセージをセットでログ出力する。"""

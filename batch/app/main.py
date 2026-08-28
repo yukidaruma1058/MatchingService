@@ -2,11 +2,10 @@
 
 画面 API や ``docker compose ... run batch`` から ``python -m app.main <job>`` で起動する。
 ジョブ名とバッチ ID の対応:
-  - ``sort`` → BAT-001（メール振り分け）
   - ``ingest`` → BAT-002（メール取込・要約）
   - ``manual_register`` → BAT-002（画面のタイトル+本文から AI 要約登録。MANUAL_EMAIL_ID 必須）
-  - ``pipeline`` → BAT-001 → BAT-002 → BAT-006 → BAT-003 →（設定ONなら BAT-004）→ BAT-008
-    （振り分け・取込・採点・任意でAI判定・返信同期）
+  - ``pipeline`` → BAT-002 → BAT-006 → BAT-003 →（設定ONなら BAT-004）→ BAT-008
+    （取込・採点・任意でAI判定・返信同期）
   - ``cleanup`` → BAT-006（取込データ削除）
   - ``match`` → BAT-003（ルールスコア採点）
   - ``talent_propose`` → BAT-007（要員側へ案件提案・手動）
@@ -78,7 +77,6 @@ from app.gmail_client import GmailConfigError
 from app.logging_util import configure_logging, get_batch_logger, log_error_event, log_event
 
 _JOB_CHOICES = [
-    "sort",
     "ingest",
     "manual_register",
     "pipeline",
@@ -119,57 +117,6 @@ def run(job: str, *, match_trigger: str = "manual") -> int:
         module_name="app.main",
         extra={"job": job},
     )
-
-    if job == "sort":
-        try:
-            run_sort_batch = _load_batch_callable(
-                "BAT-001",
-                "gmail_sort",
-                "run_sort_batch",
-                clear_modules=("db", "classifier", "gmail_sort"),
-            )
-            stats = run_sort_batch()
-            log_event(
-                logger,
-                logging.INFO,
-                event="batch.run.finished",
-                message="Batch job finished: sort",
-                operation="バッチジョブ完了",
-                method_name="run",
-                job_id="run",
-                function_id="BATCH",
-                module_name="app.main",
-                extra={
-                    "job": job,
-                    "scanned": stats.scanned,
-                    "sorted": stats.sorted_count,
-                    "skipped": stats.skipped,
-                    "failed": stats.failed,
-                },
-            )
-        except GmailConfigError as exc:
-            log_error_event(
-                logger,
-                event="batch.job.failed",
-                error_code=exc.error_code,
-                detail=exc.message,
-                operation="メール振り分け",
-                method_name="run",
-                job_id="unknown",
-            )
-            return 1
-        except Exception as exc:
-            log_error_event(
-                logger,
-                event="batch.job.failed",
-                error_code="ERR-0030",
-                detail=str(exc),
-                operation="メール振り分け",
-                method_name="run",
-                job_id="unknown",
-            )
-            return 1
-        return 0 if stats.failed == 0 or stats.sorted_count > 0 else 1
 
     if job == "ingest":
         try:
@@ -251,21 +198,49 @@ def run(job: str, *, match_trigger: str = "manual") -> int:
         return 0 if result.ok else 1
 
     if job == "pipeline":
-        # 基本セット: BAT-001 → BAT-002 → BAT-006 → BAT-003 →（任意 BAT-004）→ BAT-008
+        # 基本セット: 人材取込 → 案件取込 → スキルシート → BAT-006 → BAT-003 →（任意 BAT-004）→ BAT-008
+        import os
         import time
         import uuid as _uuid
 
-        pipeline_job_id = f"pipeline_{_uuid.uuid4().hex[:12]}"
+        pipeline_job_id = (os.environ.get("PIPELINE_JOB_ID") or "").strip() or f"pipeline_{_uuid.uuid4().hex[:12]}"
+        os.environ["PIPELINE_JOB_ID"] = pipeline_job_id
         pipeline_started = time.perf_counter()
         step_timings: list[dict[str, object]] = []
+        ai_enabled = _is_ai_assist_enabled()
+        pipeline_step_defs: list[tuple[str, str, dict[str, str]]] = [
+            ("ingest_talent", "ingest", {"INGEST_SCOPE": "talent"}),
+            ("ingest_project", "ingest", {"INGEST_SCOPE": "project"}),
+            ("ingest_skill_sheets", "ingest", {"INGEST_SCOPE": "skill_sheets"}),
+            ("cleanup", "cleanup", {}),
+            ("match", "match", {}),
+        ]
+        if ai_enabled:
+            pipeline_step_defs.append(("ai_judge", "ai_judge", {}))
+        pipeline_step_defs.append(("reply_sync", "reply_sync", {}))
 
-        def _run_step(step_name: str, *args: object, **kwargs: object) -> int:
+        def _run_pipeline_step(step_id: str, job_name: str, extra_env: dict[str, str]) -> int:
+            for key, value in extra_env.items():
+                os.environ[key] = value
+            log_event(
+                logger,
+                logging.INFO,
+                event="batch.pipeline.step_started",
+                message=f"Pipeline step started: {step_id}",
+                operation="パイプライン工程開始",
+                method_name="run",
+                job_id=pipeline_job_id,
+                function_id="BATCH",
+                module_name="app.main",
+                extra={"step": step_id, "job": job_name},
+            )
             step_started = time.perf_counter()
-            code = run(step_name, **kwargs)  # type: ignore[arg-type]
+            code = run(job_name, **({"match_trigger": "batch_auto"} if job_name == "match" else {}))  # type: ignore[arg-type]
             step_ms = int((time.perf_counter() - step_started) * 1000)
             step_timings.append(
                 {
-                    "step": step_name,
+                    "step": step_id,
+                    "job": job_name,
                     "exit_code": code,
                     "duration_ms": step_ms,
                 }
@@ -274,14 +249,14 @@ def run(job: str, *, match_trigger: str = "manual") -> int:
                 logger,
                 logging.INFO,
                 event="batch.pipeline.step_finished",
-                message=f"Pipeline step finished: {step_name}",
+                message=f"Pipeline step finished: {step_id}",
                 operation="パイプライン工程完了",
                 method_name="run",
                 job_id=pipeline_job_id,
                 function_id="BATCH",
                 module_name="app.main",
                 duration_ms=step_ms,
-                extra={"step": step_name, "exit_code": code},
+                extra={"step": step_id, "job": job_name, "exit_code": code},
             )
             return code
 
@@ -296,25 +271,16 @@ def run(job: str, *, match_trigger: str = "manual") -> int:
             function_id="BATCH",
             module_name="app.main",
             extra={
-                "steps": ["sort", "ingest", "cleanup", "match", "ai_judge?", "reply_sync"],
+                "steps": [step_id for step_id, _, _ in pipeline_step_defs],
+                "ai_assist_enabled": ai_enabled,
             },
         )
 
         failed_step: str | None = None
-        if _run_step("sort") != 0:
-            failed_step = "sort"
-        elif _run_step("ingest") != 0:
-            failed_step = "ingest"
-        elif _run_step("cleanup") != 0:
-            failed_step = "cleanup"
-        elif _run_step("match", match_trigger="batch_auto") != 0:
-            failed_step = "match"
-        else:
-            if _is_ai_assist_enabled():
-                if _run_step("ai_judge") != 0:
-                    failed_step = "ai_judge"
-            if failed_step is None and _run_step("reply_sync") != 0:
-                failed_step = "reply_sync"
+        for step_id, job_name, extra_env in pipeline_step_defs:
+            if _run_pipeline_step(step_id, job_name, extra_env) != 0:
+                failed_step = step_id
+                break
 
         total_ms = int((time.perf_counter() - pipeline_started) * 1000)
         log_event(

@@ -35,9 +35,10 @@ services:
       - ../.env
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://matching:matching@db:5432/matching}
-      # OPENAI_API_KEY / CURSOR_API_KEY は env_file のみから渡す。
+      # OPENAI_API_KEY / CURSOR_API_KEY / ANTHROPIC_API_KEY は env_file のみから渡す。
       # ここで ${OPENAI_API_KEY:-} と書くと、compose 補間が空のとき env_file の値を空文字で上書きする。
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
       GMAIL_CREDENTIALS_PATH: ${GMAIL_CREDENTIALS_PATH:-/secrets/credentials.json}
       GMAIL_TOKEN_PATH: ${GMAIL_TOKEN_PATH:-/secrets/token.json}
       GMAIL_OAUTH_REDIRECT_URI: ${GMAIL_OAUTH_REDIRECT_URI:-}
@@ -49,6 +50,7 @@ services:
       GMAIL_OAUTH_PROJECT_ID: ${GMAIL_OAUTH_PROJECT_ID:-matching-service}
       BATCH_ROOT: /batch
       BATCH_LOG_PATH: ${BATCH_LOG_PATH:-/app/log/batch.log}
+      BATCH_TMP_DIR: ${BATCH_TMP_DIR:-/app/log/batch_tmp}
     volumes:
       - ../secrets:/secrets
       - ../log:/app/log
@@ -93,9 +95,10 @@ services:
       - ../.env
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://matching:matching@db:5432/matching}
-      # OPENAI_API_KEY / CURSOR_API_KEY は env_file のみ（空の compose 補間で上書きしない）
+      # OPENAI_API_KEY / CURSOR_API_KEY / ANTHROPIC_API_KEY は env_file のみ（空の compose 補間で上書きしない）
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
-      BATCH_JOB: ${BATCH_JOB:-sort}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
+      BATCH_JOB: ${BATCH_JOB:-pipeline}
       GMAIL_CREDENTIALS_PATH: ${GMAIL_CREDENTIALS_PATH:-/secrets/credentials.json}
       GMAIL_TOKEN_PATH: ${GMAIL_TOKEN_PATH:-/secrets/token.json}
       GMAIL_CLIENT_ID: ${GMAIL_CLIENT_ID:-}
@@ -104,16 +107,13 @@ services:
       API_PUBLIC_BASE_URL: ${API_PUBLIC_BASE_URL:-}
       WEB_PUBLIC_BASE_URL: ${WEB_PUBLIC_BASE_URL:-}
       GMAIL_OAUTH_REDIRECT_URI: ${GMAIL_OAUTH_REDIRECT_URI:-}
-      GMAIL_SORT_SOURCE_LABEL: ${GMAIL_SORT_SOURCE_LABEL:-SES未振り分け}
       GMAIL_SORT_LABEL_TALENT: ${GMAIL_SORT_LABEL_TALENT:-SES人材紹介}
       GMAIL_SORT_LABEL_PROJECT: ${GMAIL_SORT_LABEL_PROJECT:-SES案件配信}
-      GMAIL_SORT_UNKNOWN_LABEL: ${GMAIL_SORT_UNKNOWN_LABEL:-SES要確認}
-      GMAIL_SORT_KEYWORDS_TALENT: ${GMAIL_SORT_KEYWORDS_TALENT:-人材\n要員\nスキルシート\nご紹介}
-      GMAIL_SORT_KEYWORDS_PROJECT: ${GMAIL_SORT_KEYWORDS_PROJECT:-案件\n募集\n開発\nお問い合わせ}
       GMAIL_LABEL_TALENT: ${GMAIL_LABEL_TALENT:-SES人材紹介}
       GMAIL_LABEL_PROJECT: ${GMAIL_LABEL_PROJECT:-SES案件配信}
       INGEST_DATA_RETENTION_DAYS: ${INGEST_DATA_RETENTION_DAYS:-0}
       BATCH_LOG_PATH: ${BATCH_LOG_PATH:-/app/log/batch.log}
+      BATCH_TMP_DIR: ${BATCH_TMP_DIR:-/app/log/batch_tmp}
     volumes:
       - ../secrets:/secrets
       - ../log:/app/log

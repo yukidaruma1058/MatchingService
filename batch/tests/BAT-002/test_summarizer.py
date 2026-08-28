@@ -129,7 +129,13 @@ class SummarizerTests(unittest.TestCase):
         self.assertFalse(any(s.startswith("実務経験") for s in data["skills"]))
 
     def test_heuristic_project_fills_fields(self) -> None:
-        cfg = SimpleNamespace(cursor_api_key="", openai_api_key="", openai_model="gpt-4o-mini")
+        cfg = SimpleNamespace(
+            cursor_api_key="",
+            openai_api_key="",
+            openai_model="gpt-4o-mini",
+            anthropic_api_key="",
+            anthropic_model="claude-haiku-4-5-20251001",
+        )
         result = extract_email_fields(
             "project",
             "【ML◎注力案件】Java/PostgreSQL　長期保守案件",
@@ -142,7 +148,13 @@ class SummarizerTests(unittest.TestCase):
         self.assertTrue(result.data["location"])
 
     def test_heuristic_astro_talent(self) -> None:
-        cfg = SimpleNamespace(cursor_api_key="", openai_api_key="", openai_model="gpt-4o-mini")
+        cfg = SimpleNamespace(
+            cursor_api_key="",
+            openai_api_key="",
+            openai_model="gpt-4o-mini",
+            anthropic_api_key="",
+            anthropic_model="claude-haiku-4-5-20251001",
+        )
         result = extract_email_fields(
             "talent",
             "◆【Astro?人材】◆中上級PG◆・JAVA・Spring Boot・＠北綾瀬",

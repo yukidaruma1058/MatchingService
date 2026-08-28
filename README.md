@@ -50,9 +50,9 @@ GMAIL_CLIENT_SECRET=your-client-secret
 # 常駐サービス（DB / API / Web）
 docker compose -f .docker/docker-compose.yml up -d --build db api web
 
-# バッチ手動実行（引数なし = sort。ingest / pipeline / cleanup / reply_sync 等も可）
+# バッチ手動実行（引数なし = pipeline。ingest / cleanup / match 等も可）
 # ログ: log/batch.log
-docker compose -f .docker/docker-compose.yml --profile batch run --rm batch sort
+docker compose -f .docker/docker-compose.yml --profile batch run --rm batch pipeline
 ```
 
 開発時の API ホットリロードは [`.docker/docker-compose.override.yml`](.docker/docker-compose.override.yml) を併用します（Web は本番ビルドのまま）。
@@ -89,4 +89,4 @@ docker compose \
 - 案件一覧のスコア帯分布・応募人数などリッチ表示
 - 設定の取込時刻 UI の拡充
 
-実装済みの主要機能: Gmail 振り分け・取込・要約、スキルシート共有ドライブ保存、ルール採点、人材/案件詳細からの提案・AI採点、スキルマスタ、設定・Gmail/Drive OAuth
+実装済みの主要機能: Gmail 取込・要約、スキルシート共有ドライブ保存、ルール採点、人材/案件詳細からの提案・AI採点、スキルマスタ、設定・Gmail/Drive OAuth

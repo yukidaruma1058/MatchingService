@@ -11,7 +11,7 @@ from app.gmail_status import fetch_gmail_status
 from app.schemas import SettingsResponse, SettingsUpdateRequest
 from app.setting_keys import (
     DEFAULT_SETTINGS,
-    GMAIL_SORT_SETTING_KEYS,
+    GMAIL_INGEST_LABEL_SETTING_KEYS,
     SETTING_KEY_AI_ASSIST_ENABLED,
     SETTING_KEY_AI_JUDGEMENT_TOP_N,
     SETTING_KEY_OWN_COMPANY_NAME,
@@ -20,12 +20,8 @@ from app.setting_keys import (
     SETTING_KEY_GMAIL_OAUTH_CLIENT_SECRET,
     SETTING_KEY_GMAIL_OAUTH_PROJECT_ID,
     SETTING_KEY_INGEST_RETENTION_DAYS,
-    SETTING_KEY_GMAIL_SORT_KEYWORDS_PROJECT,
-    SETTING_KEY_GMAIL_SORT_KEYWORDS_TALENT,
     SETTING_KEY_GMAIL_SORT_LABEL_PROJECT,
     SETTING_KEY_GMAIL_SORT_LABEL_TALENT,
-    SETTING_KEY_GMAIL_SORT_SOURCE_LABEL,
-    SETTING_KEY_GMAIL_SORT_UNKNOWN_LABEL,
     SETTING_KEY_REPLY_KEYWORDS_NG,
     SETTING_KEY_REPLY_KEYWORDS_OK,
     SETTING_KEY_TEMPLATE_PROJECT_PROPOSE,
@@ -66,18 +62,8 @@ def _to_response(raw: dict, request: Request) -> SettingsResponse:
     talent_tpl = raw.get(SETTING_KEY_TEMPLATE_TALENT_PROPOSE)
     return SettingsResponse(
         ingest_data_retention_days=retention_days,
-        gmail_sort_source_label=_as_str(raw.get(SETTING_KEY_GMAIL_SORT_SOURCE_LABEL), "gmail_sort_source_label"),
         gmail_sort_label_talent=_as_str(raw.get(SETTING_KEY_GMAIL_SORT_LABEL_TALENT), "gmail_sort_label_talent"),
         gmail_sort_label_project=_as_str(raw.get(SETTING_KEY_GMAIL_SORT_LABEL_PROJECT), "gmail_sort_label_project"),
-        gmail_sort_unknown_label=_as_str(raw.get(SETTING_KEY_GMAIL_SORT_UNKNOWN_LABEL), "gmail_sort_unknown_label"),
-        gmail_sort_keywords_talent=_as_str(
-            raw.get(SETTING_KEY_GMAIL_SORT_KEYWORDS_TALENT),
-            "gmail_sort_keywords_talent",
-        ),
-        gmail_sort_keywords_project=_as_str(
-            raw.get(SETTING_KEY_GMAIL_SORT_KEYWORDS_PROJECT),
-            "gmail_sort_keywords_project",
-        ),
         ai_assist_enabled=bool(raw.get(SETTING_KEY_AI_ASSIST_ENABLED, False)),
         ai_judgement_top_n=_as_int(raw.get(SETTING_KEY_AI_JUDGEMENT_TOP_N), 5, minimum=1, maximum=20),
         own_company_name=str(raw.get(SETTING_KEY_OWN_COMPANY_NAME) or "").strip(),
@@ -131,18 +117,10 @@ def update_settings(
 
     if body.ingest_data_retention_days is not None:
         updates[SETTING_KEY_INGEST_RETENTION_DAYS] = body.ingest_data_retention_days
-    if body.gmail_sort_source_label is not None:
-        updates[SETTING_KEY_GMAIL_SORT_SOURCE_LABEL] = body.gmail_sort_source_label.strip()
     if body.gmail_sort_label_talent is not None:
         updates[SETTING_KEY_GMAIL_SORT_LABEL_TALENT] = body.gmail_sort_label_talent.strip()
     if body.gmail_sort_label_project is not None:
         updates[SETTING_KEY_GMAIL_SORT_LABEL_PROJECT] = body.gmail_sort_label_project.strip()
-    if body.gmail_sort_unknown_label is not None:
-        updates[SETTING_KEY_GMAIL_SORT_UNKNOWN_LABEL] = body.gmail_sort_unknown_label.strip()
-    if body.gmail_sort_keywords_talent is not None:
-        updates[SETTING_KEY_GMAIL_SORT_KEYWORDS_TALENT] = body.gmail_sort_keywords_talent.strip()
-    if body.gmail_sort_keywords_project is not None:
-        updates[SETTING_KEY_GMAIL_SORT_KEYWORDS_PROJECT] = body.gmail_sort_keywords_project.strip()
     if body.ai_assist_enabled is not None:
         updates[SETTING_KEY_AI_ASSIST_ENABLED] = body.ai_assist_enabled
     if body.ai_judgement_top_n is not None:
@@ -182,7 +160,7 @@ def update_settings(
     if not updates:
         raise HTTPException(status_code=400, detail="No settings to update")
 
-    for key in GMAIL_SORT_SETTING_KEYS:
+    for key in GMAIL_INGEST_LABEL_SETTING_KEYS:
         if key in updates and not str(updates[key]).strip():
             raise HTTPException(status_code=400, detail=f"{key} must not be empty")
 

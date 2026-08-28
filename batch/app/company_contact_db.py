@@ -210,7 +210,11 @@ def link_company_contact_for_ingest(
         session.execute(
             update(Project)
             .where(Project.id == project_id)
-            .values(distributor_company_id=company.id, updated_at=now)
+            .values(
+                distributor_company_id=company.id,
+                source_company_name=company.name,
+                updated_at=now,
+            )
         )
     session.flush()
     return CompanyContactLink(

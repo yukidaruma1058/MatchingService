@@ -69,6 +69,18 @@ def ensure_schema(engine) -> None:
             "ALTER TABLE projects ADD COLUMN IF NOT EXISTS proposal_cc_emails JSONB NOT NULL DEFAULT '[]'::jsonb"
         )
         conn.exec_driver_sql(
+            "ALTER TABLE projects ADD COLUMN IF NOT EXISTS source_company_name VARCHAR(255)"
+        )
+        conn.exec_driver_sql(
+            """
+            UPDATE projects AS p
+            SET source_company_name = c.name
+            FROM companies AS c
+            WHERE p.source_company_name IS NULL
+              AND p.distributor_company_id = c.id
+            """
+        )
+        conn.exec_driver_sql(
             "ALTER TABLE matches ADD COLUMN IF NOT EXISTS recommendation_points TEXT"
         )
         conn.exec_driver_sql(

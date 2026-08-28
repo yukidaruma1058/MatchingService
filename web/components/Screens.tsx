@@ -35,9 +35,10 @@ import {
   fetchContact,
   fetchContacts,
   fetchDashboard,
-  fetchDashboardSortQueue,
   fetchEmailDetail,
   fetchEmails,
+  fetchGmailPipelineProgress,
+  fetchRunningBatchJobs,
   fetchProject,
   fetchProjects,
   fetchSettings,
@@ -48,6 +49,7 @@ import {
   fetchTalentMatches,
   fetchTalents,
   formatGmailCheckedAt,
+  formatReceivedDate,
   formatEmailStatusLabel,
   formatOutreachStatusLabel,
   outreachStatusTone,
@@ -65,12 +67,11 @@ import {
   previewTalentPropose,
   previewProjectPropose,
   proposeToProject,
-  reclassifyEmail,
   runAiJudge,
   runGmailPipelineBatch,
-  runIngestCleanupBatch,
   runMatchScoreBatch,
   startGmailOAuth,
+  stopRunningBatchJobs,
   syncOutreachReplies,
   updateCompany,
   updateContact,
@@ -80,6 +81,8 @@ import {
   updateSkillCategoryId,
   updateTalent,
   updateProject,
+  type PipelineProgressDto,
+  type RunningBatchJobDto,
   type CompanyDto,
   type ContactDto,
   type DashboardCompanyIngestDto,
@@ -88,7 +91,6 @@ import {
   type DashboardFunnelDto,
   type DashboardPeriodRange,
   type DashboardScoreBandOkDto,
-  type DashboardSortQueueDto,
   type EmailDetailDto,
   type EmailDto,
   type ProjectDto,
@@ -228,53 +230,305 @@ function renderScreen(path: string, searchParams: SearchParams) {
   return <NotFoundScreen />;
 }
 
+function formatPipelineElapsed(seconds: number): string {
+  if (seconds < 60) {
+    return `${seconds}秒`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const rem = seconds % 60;
+  return rem > 0 ? `${minutes}分${rem}秒` : `${minutes}分`;
+}
+
+function formatGmailQueueCount(count: number | null | undefined, capped?: boolean): string {
+  if (count == null) {
+    return "—";
+  }
+  return capped ? `${count}+` : String(count);
+}
+
+/** 人材+案件の合計。2000超（打ち切りで実数がそれ以上の場合含む）は 2000+ */
+function formatGmailQueueTotal(
+  talentCount: number,
+  projectCount: number,
+  talentCapped?: boolean,
+  projectCapped?: boolean,
+): string {
+  const total = talentCount + projectCount;
+  const capped = Boolean(talentCapped || projectCapped);
+  if (total > 2000 || (total >= 2000 && capped)) {
+    return "2000+";
+  }
+  if (capped) {
+    return `${total}+`;
+  }
+  return String(total);
+}
+
+function formatPipelineDuration(seconds: number | null | undefined): string {
+  if (seconds == null || seconds <= 0) {
+    return "—";
+  }
+  return formatPipelineElapsed(seconds);
+}
+
+function MailIngestProgressPanel({ progress }: { progress: PipelineProgressDto }) {
+  if (progress.status === "not_found") {
+    return null;
+  }
+
+  const tone =
+    progress.status === "failed"
+      ? progress.error_message === "処理が停止されました" || progress.error_message === "処理が中断されました"
+        ? "cancelled"
+        : "failed"
+      : progress.status === "completed"
+        ? "completed"
+        : "running";
+
+  const totalEstimate = progress.total_estimated_seconds ?? null;
+
+  return (
+    <section className={`pipeline-progress pipeline-progress--${tone}`} aria-live="polite">
+      <div className="pipeline-progress-head">
+        <strong>
+          {progress.status === "completed"
+            ? "メール取込が完了しました"
+            : progress.error_message === "処理が停止されました"
+              ? "メール取込を停止しました"
+              : progress.error_message === "処理が中断されました"
+                ? "メール取込が中断されています"
+                : progress.status === "failed"
+                  ? "メール取込に失敗しました"
+                  : "メール取込を実行中"}
+        </strong>
+        {progress.status === "running" && progress.eta_label ? (
+          <span className="pipeline-progress-eta">全体の残り: {progress.eta_label}</span>
+        ) : null}
+      </div>
+      <div
+        className="pipeline-progress-bar pipeline-progress-bar--overall"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={progress.progress_percent}
+        aria-label="全体の進捗"
+      >
+        <span className="pipeline-progress-bar-fill" style={{ width: `${progress.progress_percent}%` }} />
+      </div>
+      <div className="pipeline-progress-meta">
+        <span>全体 {progress.progress_percent}%</span>
+        <span>
+          工程 {progress.current_step}/{progress.total_steps}: {progress.phase_label}
+        </span>
+        <span>経過 {formatPipelineElapsed(progress.elapsed_seconds)}</span>
+        {totalEstimate != null && progress.status === "running" ? (
+          <span>想定 {formatPipelineDuration(totalEstimate)}</span>
+        ) : null}
+      </div>
+      {progress.detail ? <p className="pipeline-progress-detail muted">{progress.detail}</p> : null}
+      {progress.steps.length > 0 ? (
+        <ol className="pipeline-step-list">
+          {progress.steps.map((step) => (
+            <li
+              key={step.id}
+              className={`pipeline-step pipeline-step--${step.status}`}
+              aria-current={step.status === "running" ? "step" : undefined}
+            >
+              <div className="pipeline-step-head">
+                <span className="pipeline-step-label">{step.label}</span>
+                <span className="pipeline-step-percent">{step.progress_percent}%</span>
+              </div>
+              <div
+                className="pipeline-progress-bar pipeline-progress-bar--step"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={step.progress_percent}
+                aria-label={`${step.label}の進捗`}
+              >
+                <span className="pipeline-progress-bar-fill" style={{ width: `${step.progress_percent}%` }} />
+              </div>
+              <div className="pipeline-step-meta muted">
+                <span>経過 {formatPipelineElapsed(step.elapsed_seconds)}</span>
+                {step.status === "running" && step.eta_label ? <span>残り {step.eta_label}</span> : null}
+                {step.status === "completed" ? <span>完了</span> : null}
+                {step.status === "pending" ? <span>待機中</span> : null}
+                {step.detail ? <span>{step.detail}</span> : null}
+              </div>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+      {progress.status === "failed" && progress.error_message ? (
+        <p className="pipeline-progress-error">
+          {progress.error_code ?? "ERR-0030"}: {progress.error_message}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+type MailIngestProgressCallbacks = {
+  onCompleted?: () => void | Promise<void>;
+  onFailed?: (progress: PipelineProgressDto) => void;
+};
+
+function useMailIngestProgress(callbacks?: MailIngestProgressCallbacks) {
+  const [progress, setProgress] = useState<PipelineProgressDto | null>(null);
+  const [isRunning, setIsRunning] = useState(false);
+  const jobIdRef = useRef<string | null>(null);
+  const callbacksRef = useRef(callbacks);
+  callbacksRef.current = callbacks;
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchGmailPipelineProgress()
+      .then((initial) => {
+        if (cancelled || initial.status !== "running") {
+          return;
+        }
+        jobIdRef.current = initial.job_id;
+        setProgress(initial);
+        setIsRunning(true);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isRunning) {
+      return;
+    }
+    const poll = async () => {
+      const jobId = jobIdRef.current;
+      if (!jobId) {
+        return;
+      }
+      try {
+        const next = await fetchGmailPipelineProgress(jobId);
+        setProgress(next);
+        if (next.status === "completed") {
+          setIsRunning(false);
+          await callbacksRef.current?.onCompleted?.();
+        } else if (next.status === "failed") {
+          setIsRunning(false);
+          callbacksRef.current?.onFailed?.(next);
+        }
+      } catch {
+        // 次回ポーリングで再試行
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 1500);
+    return () => window.clearInterval(timer);
+  }, [isRunning]);
+
+  async function startMailIngest() {
+    setIsRunning(true);
+    setProgress(null);
+    const result = await runGmailPipelineBatch();
+    jobIdRef.current = result.job_id ?? null;
+    if (jobIdRef.current) {
+      const initial = await fetchGmailPipelineProgress(jobIdRef.current);
+      setProgress(initial);
+    }
+  }
+
+  async function syncProgress() {
+    const jobId = jobIdRef.current;
+    try {
+      const next = jobId ? await fetchGmailPipelineProgress(jobId) : await fetchGmailPipelineProgress();
+      if (next.status === "not_found") {
+        setProgress(null);
+        setIsRunning(false);
+        return;
+      }
+      if (!jobId && next.job_id) {
+        jobIdRef.current = next.job_id;
+      }
+      setProgress(next);
+      setIsRunning(next.status === "running");
+      if (next.status === "completed") {
+        await callbacksRef.current?.onCompleted?.();
+      } else if (next.status === "failed" && next.error_message !== "処理が停止されました" && next.error_message !== "処理が中断されました") {
+        callbacksRef.current?.onFailed?.(next);
+      }
+    } catch {
+      setIsRunning(false);
+    }
+  }
+
+  return { progress, isRunning, startMailIngest, syncProgress };
+}
+
+function useRunningBatchJobs() {
+  const [jobs, setJobs] = useState<RunningBatchJobDto[]>([]);
+
+  const refresh = async () => {
+    try {
+      const result = await fetchRunningBatchJobs();
+      setJobs(result.jobs);
+    } catch {
+      setJobs([]);
+    }
+  };
+
+  useEffect(() => {
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 2000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return { jobs, refresh };
+}
+
 function DashboardScreen() {
-  const [isRunningMailIngest, setIsRunningMailIngest] = useState(false);
-  const [isRunningCleanup, setIsRunningCleanup] = useState(false);
   const [isRunningMatchScore, setIsRunningMatchScore] = useState(false);
   const [mailIngestError, setMailIngestError] = useState<{ code: string; message: string } | null>(null);
-  const [cleanupError, setCleanupError] = useState<{ code: string; message: string } | null>(null);
-  const [cleanupNotice, setCleanupNotice] = useState<string | null>(null);
   const [matchScoreError, setMatchScoreError] = useState<{ code: string; message: string } | null>(null);
   const [matchScoreNotice, setMatchScoreNotice] = useState<string | null>(null);
-  const [retentionDays, setRetentionDays] = useState<number | null>(null);
   const [dashboard, setDashboard] = useState<DashboardDto | null>(null);
-  const [sortQueue, setSortQueue] = useState<DashboardSortQueueDto | null>(null);
-  const [sortQueueLoading, setSortQueueLoading] = useState(true);
   const [emails, setEmails] = useState<EmailDto[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [chartBusy, setChartBusy] = useState(false);
   const [chartRange, setChartRange] = useState<DashboardPeriodRange>("month");
   const [chartEnd, setChartEnd] = useState<string | undefined>(undefined);
+  const [isStoppingBatch, setIsStoppingBatch] = useState(false);
+  const [batchStopNotice, setBatchStopNotice] = useState<string | null>(null);
 
-  const loadSortQueue = (refresh = false) => {
-    setSortQueueLoading(true);
-    return fetchDashboardSortQueue({ refresh })
-      .then((data) => setSortQueue(data))
-      .catch(() =>
-        setSortQueue({
-          label: "振り分け対象",
-          count: null,
-          capped: false,
-          cached: false,
-          fetched_at: null,
-          expires_at: null,
-          cache_ttl_seconds: 900,
-          error_code: "ERR-0030",
-          error_message: "振り分け待ち件数の取得に失敗しました",
-        }),
-      )
-      .finally(() => setSortQueueLoading(false));
-  };
+  const { jobs: runningBatchJobs, refresh: refreshRunningBatchJobs } = useRunningBatchJobs();
+
+  const {
+    progress: mailIngestProgress,
+    isRunning: isRunningMailIngest,
+    startMailIngest,
+    syncProgress: syncMailIngestProgress,
+  } = useMailIngestProgress({
+    onCompleted: async () => {
+      const [dash, mailList] = await Promise.all([
+        fetchDashboard({ range: chartRange, end: chartEnd }),
+        fetchEmails(),
+      ]);
+      setDashboard(dash);
+      setEmails(mailList.slice(0, 8));
+    },
+    onFailed: (failedProgress) => {
+      if (failedProgress.error_message === "処理が停止されました" || failedProgress.error_message === "処理が中断されました") {
+        return;
+      }
+      setMailIngestError({
+        code: failedProgress.error_code ?? "ERR-0030",
+        message: failedProgress.error_message ?? "メール取込・ルール採点・返信同期の実行に失敗しました",
+      });
+    },
+  });
 
   useEffect(() => {
     fetchEmails()
       .then((mailList) => setEmails(mailList.slice(0, 8)))
       .catch(() => undefined);
-    fetchSettings()
-      .then((data) => setRetentionDays(data.ingest_data_retention_days ?? 0))
-      .catch(() => setRetentionDays(null));
-    void loadSortQueue(false);
   }, []);
 
   useEffect(() => {
@@ -302,66 +556,45 @@ function DashboardScreen() {
     };
   }, [chartRange, chartEnd]);
 
-  async function handleMailIngest() {
-    setIsRunningMailIngest(true);
+  async function handleStopBatch() {
+    const labels =
+      runningBatchJobs.length > 0
+        ? runningBatchJobs.map((job) => job.job_label).join("、")
+        : isRunningMailIngest
+          ? "メール取込"
+          : isRunningMatchScore
+            ? "ルール採点"
+            : "実行中の処理";
+    const confirmed = window.confirm(`${labels} を停止します。よろしいですか？`);
+    if (!confirmed) {
+      return;
+    }
+    setIsStoppingBatch(true);
+    setBatchStopNotice(null);
     setMailIngestError(null);
     try {
-      await runGmailPipelineBatch();
-      const [dash, mailList] = await Promise.all([
-        fetchDashboard({ range: chartRange, end: chartEnd }),
-        fetchEmails(),
-      ]);
-      setDashboard(dash);
-      setEmails(mailList.slice(0, 8));
-      await loadSortQueue(true);
+      const result = await stopRunningBatchJobs();
+      setBatchStopNotice(result.message);
+      setIsRunningMatchScore(false);
+      await syncMailIngestProgress();
+      await refreshRunningBatchJobs();
+    } catch {
+      setMailIngestError({ code: "ERR-0030", message: "処理の停止に失敗しました" });
+    } finally {
+      setIsStoppingBatch(false);
+    }
+  }
+
+  async function handleMailIngest() {
+    setMailIngestError(null);
+    try {
+      await startMailIngest();
     } catch (error) {
       if (error instanceof BatchRunError) {
         setMailIngestError({ code: error.errorCode, message: error.errorMessage });
       } else {
-        setMailIngestError({ code: "ERR-0030", message: "メール振り分け・取込・ルール採点・返信同期の実行に失敗しました" });
+        setMailIngestError({ code: "ERR-0030", message: "メール取込・ルール採点・返信同期の開始に失敗しました" });
       }
-    } finally {
-      setIsRunningMailIngest(false);
-    }
-  }
-
-  async function handleIngestCleanup() {
-    const days = retentionDays ?? 0;
-    if (days <= 0) {
-      setCleanupError(null);
-      setCleanupNotice("設定の「取込データの保持」が 0 日のため削除対象はありません。設定画面で日数を指定してください。");
-      return;
-    }
-    const confirmed = window.confirm(
-      `設定どおり、${days} 日より古い取込データ（emails）を削除します。\n送信済み提案に紐づく人材・案件は対象外です。よろしいですか？`,
-    );
-    if (!confirmed) {
-      return;
-    }
-    setIsRunningCleanup(true);
-    setCleanupError(null);
-    setCleanupNotice(null);
-    try {
-      const result = await runIngestCleanupBatch();
-      setCleanupNotice(result.message || "過去取込データの削除が完了しました");
-      const [dash, mailList, settingsData] = await Promise.all([
-        fetchDashboard({ range: chartRange, end: chartEnd }),
-        fetchEmails(),
-        fetchSettings().catch(() => null),
-      ]);
-      setDashboard(dash);
-      setEmails(mailList.slice(0, 8));
-      if (settingsData) {
-        setRetentionDays(settingsData.ingest_data_retention_days ?? 0);
-      }
-    } catch (error) {
-      if (error instanceof BatchRunError) {
-        setCleanupError({ code: error.errorCode, message: error.errorMessage });
-      } else {
-        setCleanupError({ code: "ERR-0030", message: "過去取込データの削除に失敗しました" });
-      }
-    } finally {
-      setIsRunningCleanup(false);
     }
   }
 
@@ -447,19 +680,32 @@ function DashboardScreen() {
       ? `${dashboard.period_start} 〜 ${dashboard.period_end}`
       : "期間を読み込み中";
   const canGoForward = Boolean(dashboard?.can_go_forward);
-  const busy = isRunningMailIngest || isRunningCleanup || isRunningMatchScore;
+  const busy = isRunningMailIngest || isRunningMatchScore || isStoppingBatch;
+  const canStopBatch =
+    runningBatchJobs.length > 0 || isRunningMailIngest || isRunningMatchScore;
+  const runningBatchLabel =
+    runningBatchJobs.length > 0
+      ? runningBatchJobs.map((job) => job.job_label).join(" / ")
+      : null;
   const unscoredTalentCount = dashboard?.unscored_talent_count ?? 0;
   const unscoredProjectCount = dashboard?.unscored_project_count ?? 0;
   const hasUnscored = unscoredTalentCount > 0 || unscoredProjectCount > 0;
   const matchScoreLabel = hasUnscored
     ? `未採点ルール採点（人材${unscoredTalentCount}/案件${unscoredProjectCount}）`
     : "未採点ルール採点";
-  const retentionLabel =
-    retentionDays == null
-      ? "取込データ削除"
-      : retentionDays <= 0
-        ? "取込データ削除（保持: 削除しない）"
-        : `取込データ削除（${retentionDays}日超）`;
+  const gmailTalentCount = dashboard?.gmail_ingest_talent_count;
+  const gmailProjectCount = dashboard?.gmail_ingest_project_count;
+  const hasGmailQueueCounts = gmailTalentCount != null && gmailProjectCount != null;
+  const gmailQueueTotal = hasGmailQueueCounts
+    ? formatGmailQueueTotal(
+        gmailTalentCount,
+        gmailProjectCount,
+        dashboard?.gmail_ingest_talent_count_capped,
+        dashboard?.gmail_ingest_project_count_capped,
+      )
+    : null;
+  const gmailTalentLabel = dashboard?.gmail_ingest_talent_label || "人材ラベル";
+  const gmailProjectLabel = dashboard?.gmail_ingest_project_label || "案件ラベル";
 
   const onSelectRange = (next: DashboardPeriodRange) => {
     setChartRange(next);
@@ -490,6 +736,17 @@ function DashboardScreen() {
         description="人材・案件・応募・取込の概況"
         actions={
           <>
+            {canStopBatch ? (
+              <button
+                className="btn btn-danger"
+                type="button"
+                disabled={isStoppingBatch}
+                onClick={() => void handleStopBatch()}
+                title={runningBatchLabel ?? "実行中のバッチ処理を停止します"}
+              >
+                {isStoppingBatch ? "停止中..." : "処理停止"}
+              </button>
+            ) : null}
             <button
               className="btn btn-secondary"
               type="button"
@@ -513,23 +770,10 @@ function DashboardScreen() {
               {isRunningMatchScore ? "採点中..." : "全件強制再採点"}
             </button>
             <button
-              className="btn btn-secondary"
-              type="button"
-              disabled={busy}
-              onClick={() => void handleIngestCleanup()}
-              title={
-                retentionDays != null && retentionDays <= 0
-                  ? "設定の保持日数が 0 のため削除しません"
-                  : "設定の「取込データの保持」に従い古い取込データを削除"
-              }
-            >
-              {isRunningCleanup ? "削除中..." : retentionLabel}
-            </button>
-            <button
               className="btn btn-primary"
               type="button"
               disabled={busy}
-              onClick={handleMailIngest}
+              onClick={() => void handleMailIngest()}
             >
               {isRunningMailIngest ? "取込中..." : "メール取り込み"}
             </button>
@@ -541,12 +785,11 @@ function DashboardScreen() {
           {mailIngestError.code}: {mailIngestError.message}
         </p>
       ) : null}
-      {cleanupError ? (
-        <p className="notice">
-          {cleanupError.code}: {cleanupError.message}
-        </p>
+      {batchStopNotice ? <p className="notice">{batchStopNotice}</p> : null}
+      {runningBatchLabel ? <p className="muted batch-running-label">実行中: {runningBatchLabel}</p> : null}
+      {mailIngestProgress && mailIngestProgress.status !== "not_found" ? (
+        <MailIngestProgressPanel progress={mailIngestProgress} />
       ) : null}
-      {cleanupNotice ? <p className="notice">{cleanupNotice}</p> : null}
       {matchScoreError ? (
         <p className="notice">
           {matchScoreError.code}: {matchScoreError.message}
@@ -558,36 +801,24 @@ function DashboardScreen() {
         <StatCard label="登録人材" value={dashboard?.talent_count ?? 0} meta={<Link href="/talents">一覧へ</Link>} />
         <StatCard label="登録案件" value={dashboard?.project_count ?? 0} meta={<Link href="/projects">一覧へ</Link>} />
         <StatCard
-          label="振り分け待ち"
-          value={
-            sortQueueLoading && !sortQueue
-              ? "…"
-              : sortQueue?.error_code
-                ? "—"
-                : sortQueue?.capped
-                  ? `${sortQueue.count}+`
-                  : (sortQueue?.count ?? "—")
-          }
+          label="未処理メール"
+          value={gmailQueueTotal ?? "—"}
           meta={
-            <span className="muted" title={sortQueue?.label ? `ラベル: ${sortQueue.label}` : undefined}>
-              {sortQueue?.error_code
-                ? sortQueue.error_message || "取得不可"
-                : sortQueue?.cached
-                  ? "キャッシュ（15分）"
-                  : sortQueue?.label || "Gmail"}
-              {" · "}
-              <button
-                type="button"
-                className="btn btn-compact"
-                disabled={sortQueueLoading || busy}
-                onClick={() => void loadSortQueue(true)}
-              >
-                {sortQueueLoading ? "更新中…" : "再取得"}
-              </button>
-            </span>
+            <>
+              {hasGmailQueueCounts ? (
+                <span className="muted">
+                  {gmailTalentLabel}{" "}
+                  {formatGmailQueueCount(gmailTalentCount, dashboard?.gmail_ingest_talent_count_capped)} ·{" "}
+                  {gmailProjectLabel}{" "}
+                  {formatGmailQueueCount(gmailProjectCount, dashboard?.gmail_ingest_project_count_capped)}
+                </span>
+              ) : (
+                <span className="muted">Gmail ラベル件数を取得できません</span>
+              )}{" "}
+              <Link href="/emails">取込へ</Link>
+            </>
           }
         />
-        <StatCard label="未処理メール" value={dashboard?.pending_email_count ?? 0} meta={<Link href="/emails">取込へ</Link>} />
         <StatCard
           label="提案中"
           value={
@@ -664,7 +895,7 @@ function DashboardScreen() {
               <p>案件・人材提案済 … email_type=project かつ 人材提案 sent あり（現在時点）</p>
               <p>人材・案件未提案 … email_type=talent かつ 紐づく人材に案件提案（talent_proposal）の sent が無い</p>
               <p>人材・案件提案済 … email_type=talent かつ 案件提案 sent あり（現在時点）</p>
-              <p>振り分け不可 … email_type が上記以外（unknown 等）</p>
+              <p>その他 … email_type が上記以外（unknown 等）</p>
               <p>
                 <strong>提案済率</strong>
                 … 案件側 = 案件・人材提案済 ÷ 案件メール、人材側 = 人材・案件提案済 ÷ 人材メール
@@ -1007,7 +1238,7 @@ function DailyStackedBarChart({
     { key: "project_proposed", label: "案件・人材提案済", color: "#1d4ed8" },
     { key: "talent_unproposed", label: "人材・案件未提案", color: "#fcd34d" },
     { key: "talent_proposed", label: "人材・案件提案済", color: "#b45309" },
-    { key: "emails_other", label: "振り分け不可", color: "#64748b" },
+    { key: "emails_other", label: "その他", color: "#64748b" },
   ];
   const [visible, setVisible] = useState<Record<StackedSeriesKey, boolean>>({
     project_unproposed: true,
@@ -1953,6 +2184,36 @@ function TalentDetailScreen({
     }
   };
 
+  const onRunMatchScoreForTalent = async () => {
+    if (!talent) {
+      return;
+    }
+    const ok = window.confirm(
+      `人材「${talent.display_name}」と、公開中の全案件の組み合わせでルール採点します。\n既存のこの人材の採点は上書きされます。よろしいですか？`,
+    );
+    if (!ok) {
+      return;
+    }
+    setBusy(true);
+    setActionError(null);
+    setMessage(null);
+    try {
+      const result = await runMatchScoreBatch({ force: true, talentId: talent.id });
+      setMessage(
+        `全案件とのルール採点が完了しました（${formatMatchRunStatusLabel(result.status)}）: 採点 ${String(result.stats?.scored_count ?? "-")} 件`,
+      );
+      await reloadMatches();
+    } catch (err) {
+      if (err instanceof BatchRunError) {
+        setActionError(`${err.errorCode}: ${err.errorMessage}`);
+      } else {
+        setActionError(err instanceof Error ? err.message : "ルール採点に失敗しました");
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const onDeleteTalent = async () => {
     if (!talent) {
       return;
@@ -1989,6 +2250,9 @@ function TalentDetailScreen({
         actions={
           <>
             <ButtonLink href="/talents">人材一覧</ButtonLink>
+            <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void onRunMatchScoreForTalent()}>
+              {busy ? "処理中…" : "全案件とルール採点"}
+            </button>
             <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void onSyncReplies()}>
               {busy ? "処理中…" : "返信同期"}
             </button>
@@ -2466,6 +2730,7 @@ function ProjectsScreen({ searchParams }: { searchParams: SearchParams }) {
   const selectedSkills = asArray(searchParams.skills);
   const proposedFilter = asString(searchParams.proposed);
   const okFilter = asString(searchParams.ok);
+  const foreignNationalityFilter = asString(searchParams.foreign_nationality_ng);
   const page = parseListPage(searchParams.page);
   const pageSize = parseListPageSize(searchParams.page_size);
 
@@ -2528,6 +2793,7 @@ function ProjectsScreen({ searchParams }: { searchParams: SearchParams }) {
     skills: selectedSkills,
     proposed: proposedFilter,
     ok: okFilter,
+    foreignNationalityNg: foreignNationalityFilter,
   });
   const totalPages = Math.max(1, Math.ceil(filteredProjects.length / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -2587,6 +2853,8 @@ function ProjectsScreen({ searchParams }: { searchParams: SearchParams }) {
         proposedFilter={proposedFilter}
         okFilter={okFilter}
         showOutreachFilters
+        showForeignNationalityFilter
+        foreignNationalityFilter={foreignNationalityFilter}
       />
       <Panel title="案件" meta={<span className="muted">検索結果 {filteredProjects.length}件 / 全 {projects.length}件</span>}>
         <ListPagination
@@ -4509,8 +4777,7 @@ function ContactFormScreen({
 
 function EmailsScreen() {
   const [emails, setEmails] = useState<EmailDto[]>([]);
-  const [isRunning, setIsRunning] = useState(false);
-  const [reclassifyingId, setReclassifyingId] = useState<string | null>(null);
+  const [isRunningReplySync, setIsRunningReplySync] = useState(false);
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
   const [emailDetail, setEmailDetail] = useState<EmailDetailDto | null>(null);
   const [isLoadingBody, setIsLoadingBody] = useState(false);
@@ -4524,6 +4791,25 @@ function EmailsScreen() {
     fetchEmails()
       .then(setEmails)
       .catch(() => setLoadError("メール一覧の取得に失敗しました"));
+
+  const {
+    progress: mailIngestProgress,
+    isRunning: isRunningMailIngest,
+    startMailIngest,
+  } = useMailIngestProgress({
+    onCompleted: async () => {
+      setNotice("取込・ルール採点・返信同期が完了しました");
+      await reload();
+    },
+    onFailed: (failedProgress) => {
+      setError({
+        code: failedProgress.error_code ?? "ERR-0030",
+        message: failedProgress.error_message ?? "メール取込・ルール採点・返信同期の実行に失敗しました",
+      });
+    },
+  });
+
+  const isRunning = isRunningMailIngest || isRunningReplySync;
 
   useEffect(() => {
     reload();
@@ -4574,26 +4860,21 @@ function EmailsScreen() {
   }
 
   async function handleIngest() {
-    setIsRunning(true);
     setError(null);
     setNotice(null);
     try {
-      await runGmailPipelineBatch();
-      setNotice("振り分け・取込・ルール採点・返信同期が完了しました");
-      await reload();
+      await startMailIngest();
     } catch (err) {
       if (err instanceof BatchRunError) {
         setError({ code: err.errorCode, message: err.errorMessage });
       } else {
-        setError({ code: "ERR-0030", message: "メール振り分け・取込・ルール採点・返信同期の実行に失敗しました" });
+        setError({ code: "ERR-0030", message: "メール取込・ルール採点・返信同期の開始に失敗しました" });
       }
-    } finally {
-      setIsRunning(false);
     }
   }
 
   async function handleReplySync() {
-    setIsRunning(true);
+    setIsRunningReplySync(true);
     setError(null);
     setNotice(null);
     try {
@@ -4606,34 +4887,9 @@ function EmailsScreen() {
         setError({ code: "ERR-0030", message: err instanceof Error ? err.message : "返信同期に失敗しました" });
       }
     } finally {
-      setIsRunning(false);
+      setIsRunningReplySync(false);
     }
   }
-
-  async function handleReclassify(emailId: string, emailType: "talent" | "project") {
-    setReclassifyingId(emailId);
-    setError(null);
-    setNotice(null);
-    try {
-      const result = await reclassifyEmail(emailId, emailType);
-      setNotice(result.message);
-      if (selectedEmailId === emailId) {
-        closeEmailBody();
-      }
-      await reload();
-    } catch (err) {
-      if (err instanceof BatchRunError) {
-        setError({ code: err.errorCode, message: err.errorMessage });
-      } else {
-        setError({ code: "ERR-0030", message: "手動振り分けに失敗しました" });
-      }
-    } finally {
-      setReclassifyingId(null);
-    }
-  }
-
-  const unknownEmails = emails.filter((mail) => mail.email_type === "unknown");
-  const otherEmails = emails.filter((mail) => mail.email_type !== "unknown");
 
   const renderBodyPanel = () => (
     <div ref={bodyPanelRef} className="email-body-inline">
@@ -4668,85 +4924,15 @@ function EmailsScreen() {
     <>
       <Topbar
         title="メール取込"
-        description="振り分け・取込・ルール採点・返信同期の実行と判別不能の手動振り分け"
+        description="設定した Gmail ラベルから人材 / 案件を取り込み、ルール採点・返信同期を実行します"
         actions={<ButtonLink href="/settings">設定へ</ButtonLink>}
       />
       {error ? <p className="notice">{error.code}: {error.message}</p> : null}
       {notice ? <p className="notice">{notice}</p> : null}
       {loadError ? <p className="notice">{loadError}</p> : null}
-
-      <Panel title="判別不能メール" meta={<span className="muted">{unknownEmails.length}件</span>}>
-        <p className="muted field-help-block">
-          自動振り分けで要確認になったメールを、人材 / 案件へ手動で振り分けます。振り分け後は下のパイプラインで要約登録・ルール採点・返信同期まで実行してください。
-        </p>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>件名</th>
-              <th>From</th>
-              <th>ラベル</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {unknownEmails.map((mail) => {
-              const busy = reclassifyingId === mail.id;
-              const isOpen = selectedEmailId === mail.id;
-              return (
-                <Fragment key={mail.id}>
-                  <tr className={isOpen ? "is-selected" : undefined}>
-                    <td>{mail.id.slice(0, 8)}</td>
-                    <td>{mail.subject}</td>
-                    <td>{mail.from_address}</td>
-                    <td>{mail.label}</td>
-                    <td>
-                      <div className="table-actions">
-                        <button
-                          className="btn btn-ghost"
-                          type="button"
-                          disabled={isLoadingBody && !isOpen}
-                          onClick={() => void openEmailBody(mail.id)}
-                        >
-                          {isOpen ? "本文を閉じる" : "本文"}
-                        </button>
-                        <button
-                          className="btn btn-secondary"
-                          type="button"
-                          disabled={busy || isRunning}
-                          onClick={() => void handleReclassify(mail.id, "talent")}
-                        >
-                          {busy ? "処理中..." : "人材へ"}
-                        </button>
-                        <button
-                          className="btn btn-secondary"
-                          type="button"
-                          disabled={busy || isRunning}
-                          onClick={() => void handleReclassify(mail.id, "project")}
-                        >
-                          {busy ? "処理中..." : "案件へ"}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                  {isOpen ? (
-                    <tr className="email-body-row">
-                      <td colSpan={5}>{renderBodyPanel()}</td>
-                    </tr>
-                  ) : null}
-                </Fragment>
-              );
-            })}
-            {unknownEmails.length === 0 ? (
-              <tr>
-                <td colSpan={5}>
-                  <span className="muted">判別不能メールはありません。</span>
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </Panel>
+      {mailIngestProgress && mailIngestProgress.status !== "not_found" ? (
+        <MailIngestProgressPanel progress={mailIngestProgress} />
+      ) : null}
 
       <Panel
         title="取込状況"
@@ -4755,18 +4941,18 @@ function EmailsScreen() {
             <button
               className="btn btn-secondary"
               type="button"
-              disabled={isRunning || reclassifyingId !== null}
+              disabled={isRunning}
               onClick={() => void handleReplySync()}
             >
-              {isRunning ? "実行中..." : "返信同期のみ"}
+              {isRunningReplySync ? "実行中..." : "返信同期のみ"}
             </button>
             <button
               className="btn btn-primary"
               type="button"
-              disabled={isRunning || reclassifyingId !== null}
+              disabled={isRunning}
               onClick={() => void handleIngest()}
             >
-              {isRunning ? "実行中..." : "振り分け・取込・採点・返信同期"}
+              {isRunningMailIngest ? "取込中..." : "取込・採点・返信同期"}
             </button>
           </div>
         }
@@ -4774,7 +4960,7 @@ function EmailsScreen() {
         <table className="table">
           <thead><tr><th>ID</th><th>件名</th><th>ラベル</th><th>状態</th><th>登録先</th><th>操作</th></tr></thead>
           <tbody>
-            {otherEmails.map((mail) => {
+            {emails.map((mail) => {
               const isOpen = selectedEmailId === mail.id;
               return (
                 <Fragment key={mail.id}>
@@ -4811,7 +4997,7 @@ function EmailsScreen() {
                 </Fragment>
               );
             })}
-            {otherEmails.length === 0 ? (
+            {emails.length === 0 ? (
               <tr><td colSpan={6}><span className="muted">取込メールはまだありません。</span></td></tr>
             ) : null}
           </tbody>
@@ -4833,12 +5019,8 @@ function SettingsScreen({ searchParams }: { searchParams: SearchParams }) {
   const [talentProposeRateMarkup, setTalentProposeRateMarkup] = useState(0);
   const [skillSheetDriveFolderId, setSkillSheetDriveFolderId] = useState("");
   const [ingestDataRetentionDays, setIngestDataRetentionDays] = useState(settings.ingestDataRetentionDays);
-  const [gmailSortSourceLabel, setGmailSortSourceLabel] = useState(settings.sortSourceLabel);
-  const [gmailSortTalentLabel, setGmailSortTalentLabel] = useState(settings.sortTalentLabel);
-  const [gmailSortProjectLabel, setGmailSortProjectLabel] = useState(settings.sortProjectLabel);
-  const [gmailSortUnknownLabel, setGmailSortUnknownLabel] = useState(settings.sortUnknownLabel);
-  const [gmailSortKeywordsTalent, setGmailSortKeywordsTalent] = useState(settings.sortKeywordsTalent);
-  const [gmailSortKeywordsProject, setGmailSortKeywordsProject] = useState(settings.sortKeywordsProject);
+  const [gmailIngestTalentLabel, setGmailIngestTalentLabel] = useState(settings.ingestTalentLabel);
+  const [gmailIngestProjectLabel, setGmailIngestProjectLabel] = useState(settings.ingestProjectLabel);
   const [gmailConnectedAccount, setGmailConnectedAccount] = useState<string | null>(settings.gmailAccount);
   const [gmailAuthStatus, setGmailAuthStatus] = useState<SettingsPayload["gmail_auth_status"]>("disconnected");
   const [gmailLastCheckedAt, setGmailLastCheckedAt] = useState<string | null>(null);
@@ -4859,12 +5041,8 @@ function SettingsScreen({ searchParams }: { searchParams: SearchParams }) {
     setIngestDataRetentionDays(
       typeof data.ingest_data_retention_days === "number" ? data.ingest_data_retention_days : settings.ingestDataRetentionDays,
     );
-    setGmailSortSourceLabel(data.gmail_sort_source_label ?? settings.sortSourceLabel);
-    setGmailSortTalentLabel(data.gmail_sort_label_talent ?? settings.sortTalentLabel);
-    setGmailSortProjectLabel(data.gmail_sort_label_project ?? settings.sortProjectLabel);
-    setGmailSortUnknownLabel(data.gmail_sort_unknown_label ?? settings.sortUnknownLabel);
-    setGmailSortKeywordsTalent(data.gmail_sort_keywords_talent ?? settings.sortKeywordsTalent);
-    setGmailSortKeywordsProject(data.gmail_sort_keywords_project ?? settings.sortKeywordsProject);
+    setGmailIngestTalentLabel(data.gmail_sort_label_talent ?? settings.ingestTalentLabel);
+    setGmailIngestProjectLabel(data.gmail_sort_label_project ?? settings.ingestProjectLabel);
     setAiAssistEnabled(Boolean(data.ai_assist_enabled));
     setAiJudgementTopN(typeof data.ai_judgement_top_n === "number" ? data.ai_judgement_top_n : 5);
     setOwnCompanyName(data.own_company_name ?? "");
@@ -4932,12 +5110,8 @@ function SettingsScreen({ searchParams }: { searchParams: SearchParams }) {
     try {
       const saved = await updateSettings({
         ingest_data_retention_days: ingestDataRetentionDays,
-        gmail_sort_source_label: gmailSortSourceLabel,
-        gmail_sort_label_talent: gmailSortTalentLabel,
-        gmail_sort_label_project: gmailSortProjectLabel,
-        gmail_sort_unknown_label: gmailSortUnknownLabel,
-        gmail_sort_keywords_talent: gmailSortKeywordsTalent,
-        gmail_sort_keywords_project: gmailSortKeywordsProject,
+        gmail_sort_label_talent: gmailIngestTalentLabel,
+        gmail_sort_label_project: gmailIngestProjectLabel,
         ai_assist_enabled: aiAssistEnabled,
         ai_judgement_top_n: aiJudgementTopN,
         own_company_name: ownCompanyName,
@@ -5140,7 +5314,7 @@ function SettingsScreen({ searchParams }: { searchParams: SearchParams }) {
               <span className="score-input-suffix">日前より古いデータを削除</span>
             </div>
             <p className="muted field-help-block">
-              0 を指定すると削除しません。ダッシュボードの「取込データ削除」ボタン、または「メール取り込み」／メール取込画面のパイプライン実行時に、保持期間を超えた取込データ（emails）を削除します。送信済みの案件提案・要員提案に紐づく人材・案件（およびその取込元メール）は削除対象外です。
+              0 を指定すると削除しません。「メール取り込み」実行時のパイプラインで、保持期間を超えた取込データ（emails）を自動削除します。送信済みの案件提案・要員提案に紐づく人材・案件（およびその取込元メール）は削除対象外です。
             </p>
           </div>
         </article>
@@ -5205,7 +5379,7 @@ function SettingsScreen({ searchParams }: { searchParams: SearchParams }) {
                     </li>
                     <li>作成完了後に表示される <strong>Client ID</strong> と <strong>Client Secret</strong> を下のフォームへ入力します。</li>
                     <li>「Gmailと連携する」を押すと Google の認可画面が開きます。連携する Gmail アカウントでログインし、アクセスを許可してください。</li>
-                    <li>設定画面に戻り「Gmail 連携済み」と表示されれば完了です。Gmail 側で振り分け用ラベル（例: SES未振り分け）も作成してください。</li>
+                    <li>設定画面に戻り「Gmail 連携済み」と表示されれば完了です。Gmail 側で人材 / 案件用ラベルをフィルタで付与する設定も行ってください。</li>
                   </ol>
                   <strong>「追加のアクセス権が必要です」と表示される場合</strong>
                   <p>
@@ -5282,58 +5456,26 @@ function SettingsScreen({ searchParams }: { searchParams: SearchParams }) {
           </div>
 
           <div className="settings-subsection">
-            <h3>振り分けバッチ（BAT-001）</h3>
+            <h3>メール取込（BAT-002）</h3>
             <p className="muted field-help-block">
-              未処理メールを人材用 / 案件用ラベルへ振り分けます。人材用・案件用・要確認ラベルと、自動生成の「ラベル名（処理済み）」「ラベル名返信」は未作成なら取込時に自動作成します。
+              Gmail フィルタで付与したラベル名を指定してください。取込時はこれらのラベル付きメールを DB に登録し、処理後は「ラベル名（処理済み）」へ移動します。「ラベル名返信」は提案送信時に自動作成されます。
             </p>
-            <Field label="振り分け対象のラベル">
-              <input
-                value={gmailSortSourceLabel}
-                onChange={(event) => setGmailSortSourceLabel(event.target.value)}
-                placeholder="SES未振り分け"
-              />
-            </Field>
             <div className="settings-field-grid">
-              <Field label="人材用ラベル">
+              <Field label="人材取込ラベル">
                 <input
-                  value={gmailSortTalentLabel}
-                  onChange={(event) => setGmailSortTalentLabel(event.target.value)}
+                  value={gmailIngestTalentLabel}
+                  onChange={(event) => setGmailIngestTalentLabel(event.target.value)}
                   placeholder="SES人材紹介"
                 />
               </Field>
-              <Field label="案件用ラベル">
+              <Field label="案件取込ラベル">
                 <input
-                  value={gmailSortProjectLabel}
-                  onChange={(event) => setGmailSortProjectLabel(event.target.value)}
+                  value={gmailIngestProjectLabel}
+                  onChange={(event) => setGmailIngestProjectLabel(event.target.value)}
                   placeholder="SES案件配信"
                 />
               </Field>
             </div>
-            <div className="settings-field-grid">
-              <Field label="振り分け用の検索ワード（要員）">
-                <textarea
-                  value={gmailSortKeywordsTalent}
-                  onChange={(event) => setGmailSortKeywordsTalent(event.target.value)}
-                  placeholder={"人材\n要員\nスキルシート\nご紹介"}
-                  rows={4}
-                />
-              </Field>
-              <Field label="振り分け用の検索ワード（案件）">
-                <textarea
-                  value={gmailSortKeywordsProject}
-                  onChange={(event) => setGmailSortKeywordsProject(event.target.value)}
-                  placeholder="1行1キーワード"
-                  rows={4}
-                />
-              </Field>
-            </div>
-            <Field label="判別不能な場合の振り分けラベル">
-              <input
-                value={gmailSortUnknownLabel}
-                onChange={(event) => setGmailSortUnknownLabel(event.target.value)}
-                placeholder="SES要確認"
-              />
-            </Field>
           </div>
 
           <div className="field">
@@ -5763,6 +5905,8 @@ function KeywordChipFilter({
   showOutreachFilters = false,
   proposedFilter = "",
   okFilter = "",
+  showForeignNationalityFilter = false,
+  foreignNationalityFilter = "",
   showSkillSheetFilter = false,
   skillSheetHas = false,
   skillSheetNone = false,
@@ -5778,6 +5922,8 @@ function KeywordChipFilter({
   showOutreachFilters?: boolean;
   proposedFilter?: string;
   okFilter?: string;
+  showForeignNationalityFilter?: boolean;
+  foreignNationalityFilter?: string;
   showSkillSheetFilter?: boolean;
   skillSheetHas?: boolean;
   skillSheetNone?: boolean;
@@ -5840,6 +5986,17 @@ function KeywordChipFilter({
               </select>
             </label>
           </>
+        ) : null}
+        {showForeignNationalityFilter ? (
+          <label className="list-filter-select">
+            <span className="chip-group-label">外国籍</span>
+            <select name="foreign_nationality_ng" defaultValue={foreignNationalityFilter || ""}>
+              <option value="">すべて</option>
+              <option value="ok">可・不問</option>
+              <option value="ng">不可</option>
+              <option value="unknown">未記入</option>
+            </select>
+          </label>
         ) : null}
         {showSkillSheetFilter ? (
           <div className="list-filter-skill-sheet" role="group" aria-labelledby="skill-sheet-filter-label">
@@ -6224,7 +6381,9 @@ function SimpleTalentTable({
             return (
               <tr key={talent.id}>
                 <td>{talent.id.slice(0, 8)}</td>
-                <td>{talent.display_name}</td>
+                <td>
+                  <Link href={`/talents/${talent.id}`}>{talent.display_name}</Link>
+                </td>
                 {!compact ? (
                   <td>
                     {talent.introducer_company_id ? (
@@ -6276,11 +6435,10 @@ function SimpleTalentTable({
                   </Badge>
                 </td>
                 {!compact ? (
-                  <td>{talent.email_received_at ? formatGmailCheckedAt(talent.email_received_at) : "-"}</td>
+                  <td>{talent.email_received_at ? formatReceivedDate(talent.email_received_at) : "-"}</td>
                 ) : null}
                 <td>
                   <div className="table-actions">
-                    <Link href={`/talents/${talent.id}`}>詳細</Link>
                     {!compact && onDelete ? (
                       <button
                         type="button"
@@ -6384,11 +6542,10 @@ function SimpleProjectTable({
                   </Badge>
                 </td>
                 {!compact ? (
-                  <td>{project.email_received_at ? formatGmailCheckedAt(project.email_received_at) : "-"}</td>
+                  <td>{project.email_received_at ? formatReceivedDate(project.email_received_at) : "-"}</td>
                 ) : null}
                 <td>
                   <div className="table-actions">
-                    <Link href={`/projects/${project.id}`}>詳細</Link>
                     {!compact && onDelete ? (
                       <button
                         type="button"
@@ -6881,7 +7038,7 @@ function TalentSkillsCell({
 
   const groups = groupSkillsByCatalog(skills, skillGroups);
   const ordered = groups.flatMap((group) => group.items);
-  const visible = ordered.slice(0, 10);
+  const visible = ordered.slice(0, 3);
   const restCount = Math.max(0, ordered.length - visible.length);
   const skillLineCount = groups.reduce((sum, group) => sum + group.items.length, 0);
 
@@ -7187,6 +7344,22 @@ function matchesYesNoFilter(value: number, filter: string): boolean {
   return true;
 }
 
+function matchesForeignNationalityNgFilter(
+  value: boolean | null | undefined,
+  filter: string,
+): boolean {
+  if (filter === "ok") {
+    return value === false;
+  }
+  if (filter === "ng") {
+    return value === true;
+  }
+  if (filter === "unknown") {
+    return value == null;
+  }
+  return true;
+}
+
 function matchSideProposedFilter(status: string | undefined, filter: string): boolean {
   const proposed = Boolean(status && status !== "none");
   if (filter === "yes") {
@@ -7412,6 +7585,7 @@ function filterProjects(
     skills,
     proposed = "",
     ok = "",
+    foreignNationalityNg = "",
   }: {
     keyword: string;
     rateMin: string;
@@ -7419,6 +7593,7 @@ function filterProjects(
     skills: string[];
     proposed?: string;
     ok?: string;
+    foreignNationalityNg?: string;
   },
 ) {
   const query = normalize(keyword);
@@ -7460,8 +7635,19 @@ function filterProjects(
         : true;
     const matchesProposed = matchesYesNoFilter(project.proposed_talent_count ?? 0, proposed);
     const matchesOk = matchesYesNoFilter(project.proposed_ok_count ?? 0, ok);
+    const matchesForeignNationality = matchesForeignNationalityNgFilter(
+      project.foreign_nationality_ng,
+      foreignNationalityNg,
+    );
 
-    return matchesKeyword && matchesRate && matchesSkills && matchesProposed && matchesOk;
+    return (
+      matchesKeyword &&
+      matchesRate &&
+      matchesSkills &&
+      matchesProposed &&
+      matchesOk &&
+      matchesForeignNationality
+    );
   });
 }
 

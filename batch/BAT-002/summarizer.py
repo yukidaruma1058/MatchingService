@@ -3,15 +3,18 @@
 優先順:
   1. CURSOR_API_KEY → Cursor SDK
   2. OPENAI_API_KEY → OpenAI Chat Completions (JSON mode)
-  3. どちらも無い / AI 失敗 → 【項目】：値 の定型パース + ヒューリスティック
+  3. ANTHROPIC_API_KEY → Claude Messages API
+  4. いずれも無い / AI 失敗 → 【項目】：値 の定型パース + ヒューリスティック
 """
 
 from __future__ import annotations
 
 import json
 import re
+import sys
 import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal, Protocol
 
 EmailType = Literal["talent", "project"]
@@ -21,6 +24,8 @@ class AiSettings(Protocol):
     cursor_api_key: str
     openai_api_key: str
     openai_model: str
+    anthropic_api_key: str
+    anthropic_model: str
 
 
 _TALENT_SCHEMA_HINT = """\
@@ -803,6 +808,58 @@ def _extract_via_openai(
         return None
 
 
+def _extract_via_claude(
+    email_type: EmailType,
+    subject: str,
+    body: str,
+    cfg: AiSettings,
+    *,
+    from_header: str | None = None,
+) -> ExtractionResult | None:
+    api_key = getattr(cfg, "anthropic_api_key", "") or ""
+    if not str(api_key).strip():
+        return None
+    try:
+        from app.claude_llm import call_claude_messages
+    except ImportError:
+        batch_root = str(Path(__file__).resolve().parents[1])
+        if batch_root not in sys.path:
+            sys.path.insert(0, batch_root)
+        try:
+            from app.claude_llm import call_claude_messages
+        except ImportError:
+            return None
+
+    content = call_claude_messages(
+        api_key=str(api_key),
+        model=getattr(cfg, "anthropic_model", None),
+        system=(
+            "You extract structured SES staffing data from Japanese emails. "
+            "Formats vary by sender company. Reply with a single JSON object only. "
+            "Never paste the full email body into summary. "
+            "Do not wrap the JSON in Markdown fences."
+        ),
+        user=_build_user_prompt(email_type, subject, body, from_header=from_header),
+        max_tokens=4096,
+        temperature=0.1,
+    )
+    if not content:
+        return None
+    payload = _parse_json_object(content)
+    if payload is None:
+        return ExtractionResult(
+            email_type=email_type,
+            data={},
+            needs_review=True,
+            provider="claude",
+            raw_summary=content[:2000],
+            error_code="ERR-0025",
+        )
+    return _finalize_with_rules(
+        email_type, subject, body, payload, provider="claude", from_header=from_header
+    )
+
+
 def _strip_html_if_needed(text: str) -> str:
     """HTML メールでも【項目】パースできるようタグを除去する。"""
     if "<" not in text or ">" not in text:
@@ -834,7 +891,7 @@ def extract_email_fields(
 ) -> ExtractionResult:
     """メールから人材/案件フィールドを抽出する。
 
-    企業ごとに書式が違うため AI（Cursor → OpenAI）を優先し、
+    企業ごとに書式が違うため AI（Cursor → OpenAI → Claude）を優先し、
     キー未設定や AI 失敗時のみルールベースへフォールバックする。
     """
     body = _strip_html_if_needed((body_text or "").strip())
@@ -851,6 +908,12 @@ def extract_email_fields(
     )
     if openai_result is not None and openai_result.data:
         return openai_result
+
+    claude_result = _extract_via_claude(
+        email_type, subject_text, body, cfg, from_header=from_header
+    )
+    if claude_result is not None and claude_result.data:
+        return claude_result
 
     return _heuristic(email_type, subject_text, body, from_header=from_header)
 

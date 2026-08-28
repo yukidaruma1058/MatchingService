@@ -12,7 +12,6 @@ COPY .docker/batch/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 COPY batch/app /app/app
-COPY batch/BAT-001 /app/BAT-001
 COPY batch/BAT-002 /app/BAT-002
 COPY batch/BAT-003 /app/BAT-003
 COPY batch/BAT-006 /app/BAT-006

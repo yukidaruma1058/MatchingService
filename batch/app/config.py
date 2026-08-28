@@ -1,10 +1,9 @@
 """バッチ共通の環境変数・設定値読込。
 
 Pydantic Settings で ``.env`` と環境変数から値を取得する。
-BAT-001 固有の Gmail 振り分け設定もここで一元管理する。
+Gmail 取込ラベル設定もここで一元管理する。
 """
 
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,22 +23,14 @@ class Settings(BaseSettings):
     gmail_oauth_project_id: str = "matching-service"
     gmail_oauth_redirect_uri: str = "http://localhost:8000/api/gmail/oauth/callback"
 
-    # --- BAT-001: メール振り分けラベル・キーワード ---
-    # system_settings テーブルに値があればそちらを優先（db.load_sort_settings 参照）
-    gmail_sort_source_label: str = "SES未振り分け"       # 振り分け対象の Gmail ラベル
-    gmail_sort_label_talent: str = "SES人材紹介"         # 要員メールと判定したときの付与ラベル
-    gmail_sort_label_project: str = "SES案件配信"        # 案件メールと判定したときの付与ラベル
-    gmail_sort_unknown_label: str = "SES要確認"          # 判別不能時の付与ラベル
-    gmail_sort_keywords_talent: str = Field(
-        default="人材\n要員\nスキルシート\nご紹介"       # 要員判定用キーワード（改行 or | 区切り）
-    )
-    gmail_sort_keywords_project: str = Field(
-        default="案件\n募集\n開発\nお問い合わせ"         # 案件判定用キーワード（改行 or | 区切り）
-    )
+    # --- BAT-002: Gmail 取込ラベル ---
+    # system_settings テーブルに値があればそちらを優先（label_settings.load_gmail_label_settings 参照）
+    gmail_sort_label_talent: str = "SES人材紹介"
+    gmail_sort_label_project: str = "SES案件配信"
     gmail_processed_label_talent: str = "SES人材紹介（処理済み）"
     gmail_processed_label_project: str = "SES案件配信（処理済み）"
 
-    # 旧環境変数名との互換（gmail_sort_label_* 未設定時のフォールバック）
+    # 旧環境変数名との互換
     gmail_label_talent: str = "SES人材紹介"
     gmail_label_project: str = "SES案件配信"
 
@@ -47,7 +38,10 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
     cursor_api_key: str = ""  # Cursor SDK / エージェント用（CURSOR_API_KEY）
-    # BAT-002 要約 / BAT-004 AI判定の LLM 並列度（1=直列、推奨 2〜3、上限 4）
+    anthropic_api_key: str = ""  # Claude API（ANTHROPIC_API_KEY）
+    anthropic_model: str = "claude-haiku-4-5-20251001"
+    # BAT-002 要約 / BAT-004 AI判定の LLM 並列度（1=直列、推奨 3〜4、上限 8）
+    # 実効値は API レート制限次第。429 が出る場合は下げる。
     ai_concurrency: int = 3
 
     # --- Google Routes（BAT-003 通勤） ---
@@ -56,9 +50,8 @@ class Settings(BaseSettings):
     google_routes_monthly_limit: int = 10000
 
     # --- バッチ起動 ---
-    batch_job: str = "sort"                              # デフォルト実行ジョブ（BAT-001）
+    batch_job: str = "pipeline"                          # デフォルト実行ジョブ
     batch_log_path: str = "log/batch.log"                # バッチ JSON ログの出力先
-    sort_body_preview_chars: int = 500                   # 振り分け判定に使う本文先頭文字数
     ingest_data_retention_days: int = 0                  # 取込データ保持日数（0=削除しない）
 
 

@@ -12,6 +12,7 @@ services:
     environment:
       BATCH_ROOT: /batch
       BATCH_LOG_PATH: /app/log/batch.log
+      BATCH_TMP_DIR: /app/log/batch_tmp
     command:
       [
         "uvicorn",

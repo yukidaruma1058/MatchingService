@@ -10,7 +10,6 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY api/app /app/app
 COPY batch/app /batch/app
-COPY batch/BAT-001 /batch/BAT-001
 COPY batch/BAT-002 /batch/BAT-002
 COPY batch/BAT-003 /batch/BAT-003
 COPY batch/BAT-006 /batch/BAT-006

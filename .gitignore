@@ -39,3 +39,8 @@ secrets/*
 log/*
 !log/.gitkeep
 batch/tmp/
+log/batch_tmp/
+# Linux core dumps (batch pipeline crash)
+core
+core.*
+batch/core.*

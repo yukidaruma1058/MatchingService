@@ -42,6 +42,8 @@ class AiSettings(Protocol):
     cursor_api_key: str
     openai_api_key: str
     openai_model: str
+    anthropic_api_key: str
+    anthropic_model: str
 
 
 @dataclass(frozen=True)
@@ -168,6 +170,54 @@ def _call_openai(prompt: str, cfg: AiSettings, *, logger: logging.Logger | None 
         return None
 
 
+def _call_claude(prompt: str, cfg: AiSettings, *, logger: logging.Logger | None = None) -> str | None:
+    api_key = getattr(cfg, "anthropic_api_key", "") or ""
+    if not str(api_key).strip():
+        return None
+    try:
+        from app.claude_llm import call_claude_messages
+    except ImportError as exc:
+        _log_error(
+            logger=logger,
+            event="outreach.reply_sync.claude_unavailable",
+            error_code="ERR-0030",
+            detail=str(exc),
+            operation="返信AI判定 Claude",
+            method_name="_call_claude",
+            job_id="reply_sync",
+            function_id="BAT-008",
+            module_name="app.reply_ai_judgment",
+        )
+        return None
+
+    try:
+        return call_claude_messages(
+            api_key=str(api_key),
+            model=getattr(cfg, "anthropic_model", None),
+            system=(
+                "You are an SES sales assistant that classifies email replies. "
+                "Reply with a single JSON object only. "
+                "Do not wrap the JSON in Markdown fences."
+            ),
+            user=prompt,
+            max_tokens=2048,
+            temperature=0.1,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _log_error(
+            logger=logger,
+            event="outreach.reply_sync.claude_failed",
+            error_code="ERR-0030",
+            detail=str(exc),
+            operation="返信AI判定 Claude",
+            method_name="_call_claude",
+            job_id="reply_sync",
+            function_id="BAT-008",
+            module_name="app.reply_ai_judgment",
+        )
+        return None
+
+
 def _build_prompt(items: list[ReplyJudgeItem], reply_body: str) -> str:
     lines = []
     for index, item in enumerate(items, start=1):
@@ -232,7 +282,11 @@ def judge_replies_with_ai(
 
     logger = _get_logger()
     prompt = _build_prompt(items, reply_body or "")
-    raw = _call_cursor(prompt, cfg, logger=logger) or _call_openai(prompt, cfg, logger=logger)
+    raw = (
+        _call_cursor(prompt, cfg, logger=logger)
+        or _call_openai(prompt, cfg, logger=logger)
+        or _call_claude(prompt, cfg, logger=logger)
+    )
     if not raw:
         return fallback
 

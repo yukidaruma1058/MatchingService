@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
     cursor_api_key: str = ""  # Cursor SDK / エージェント用（CURSOR_API_KEY）
+    anthropic_api_key: str = ""  # Claude API（ANTHROPIC_API_KEY）
+    anthropic_model: str = "claude-haiku-4-5-20251001"
     google_maps_api_key: str = ""
     google_routes_monthly_warn: int = 8000
     google_routes_monthly_limit: int = 10000
