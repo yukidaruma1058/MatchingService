@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.models import (
     Company,
     Contact,
+    DashboardHiddenMatch,
     Email,
     Match,
     OutreachMessage,
@@ -85,6 +86,7 @@ def delete_talent_cascade(session: Session, talent_id: UUID) -> dict[str, int]:
     )
     drive_ids = [row.drive_file_id for row in sheet_rows if row.drive_file_id]
     session.execute(delete(TalentSkillSheet).where(TalentSkillSheet.talent_id == talent_id))
+    session.execute(delete(DashboardHiddenMatch).where(DashboardHiddenMatch.talent_id == talent_id))
 
     session.delete(talent)
     session.flush()
@@ -156,6 +158,7 @@ def delete_project_cascade(session: Session, project_id: UUID) -> dict[str, int]
         _delete_outreach_message(session, message_id)
 
     deleted_matches = session.execute(delete(Match).where(Match.project_id == project_id)).rowcount or 0
+    session.execute(delete(DashboardHiddenMatch).where(DashboardHiddenMatch.project_id == project_id))
     session.delete(project)
     session.flush()
 

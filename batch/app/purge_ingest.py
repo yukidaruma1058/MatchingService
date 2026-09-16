@@ -10,6 +10,7 @@ from app.db_bootstrap import create_session_factory, ensure_schema
 from app.drive_client import DriveClient
 from app.gmail_client import GmailConfigError
 from app.models import (
+    DashboardHiddenMatch,
     Email,
     Match,
     MatchRun,
@@ -56,8 +57,11 @@ def purge_all_ingest_data(
         deleted_links = session.execute(delete(OutreachMessageTalent)).rowcount or 0
         deleted_outreach = session.execute(delete(OutreachMessage)).rowcount or 0
         deleted_matches = session.execute(delete(Match)).rowcount or 0
+        session.execute(delete(DashboardHiddenMatch))
         deleted_match_runs = session.execute(delete(MatchRun)).rowcount or 0
         deleted_sheets = session.execute(delete(TalentSkillSheet)).rowcount or 0
+        deleted_talents = session.execute(delete(Talent)).rowcount or 0
+        deleted_projects = session.execute(delete(Project)).rowcount or 0
         deleted_emails = session.execute(delete(Email)).rowcount or 0
 
         session.commit()
@@ -88,8 +92,8 @@ def purge_all_ingest_data(
         "before_talents": int(before["talents"]),
         "before_projects": int(before["projects"]),
         "deleted_emails": int(deleted_emails),
-        "deleted_talents": int(before["talents"]),
-        "deleted_projects": int(before["projects"]),
+        "deleted_talents": int(deleted_talents),
+        "deleted_projects": int(deleted_projects),
         "deleted_matches": int(deleted_matches),
         "deleted_match_runs": int(deleted_match_runs),
         "deleted_outreach_messages": int(deleted_outreach),

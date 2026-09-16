@@ -9,15 +9,17 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import Date, cast, func, or_, select
+from sqlalchemy import Date, and_, cast, exists, func, or_, select
 from sqlalchemy.orm import Session
 
+from app.dashboard_match_display import set_dashboard_pair_proposed
 from app.db import load_settings
 from app.deps import get_db
 from app.gmail_ingest_queue import fetch_gmail_ingest_queue_counts
 from app.match_run_query import latest_completed_match_run
 from app.models import (
     Company,
+    DashboardHiddenMatch,
     Email,
     Match,
     MatchRun,
@@ -32,9 +34,15 @@ from app.schemas import (
     DashboardDailyPoint,
     DashboardFunnel,
     DashboardFunnelConstraintLoss,
+    DashboardHighScoreMatch,
     DashboardResponse,
     DashboardScoreBandOk,
+    HideHighScoreMatchRequest,
+    HideHighScoreMatchResponse,
+    SetHighScoreMatchDisplayRequest,
+    SetHighScoreMatchDisplayResponse,
 )
+from app.setting_keys import SETTING_KEY_DASHBOARD_RULE_SCORE_MIN
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -47,6 +55,7 @@ _PERIOD_DAYS: dict[PeriodRange, int] = {
     "year": 365,
 }
 _COMPANY_TOP_N = 8
+_HIGH_SCORE_MATCH_LIMIT = 100
 
 
 def _parse_end_day(raw: str | None) -> date:
@@ -117,6 +126,109 @@ def _unscored_entity_counts(session: Session) -> tuple[int, int]:
     return int(unscored_talent_count), int(unscored_project_count)
 
 
+def _as_score_min(raw: object, default: int = 50) -> int:
+    try:
+        parsed = int(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+    return max(0, min(100, parsed))
+
+
+def _high_score_display_proposed():
+    """手動表示と送信済み提案から、一覧上の「提案済み」を決める。unproposed はメールがあっても未提案表示。"""
+    forced_unproposed = exists(
+        select(DashboardHiddenMatch.id).where(
+            DashboardHiddenMatch.talent_id == Match.talent_id,
+            DashboardHiddenMatch.project_id == Match.project_id,
+            DashboardHiddenMatch.display_as == "unproposed",
+        )
+    )
+    forced_proposed = exists(
+        select(DashboardHiddenMatch.id).where(
+            DashboardHiddenMatch.talent_id == Match.talent_id,
+            DashboardHiddenMatch.project_id == Match.project_id,
+            DashboardHiddenMatch.display_as == "proposed",
+        )
+    )
+    talent_proposed = exists(
+        select(OutreachMessage.id).where(
+            OutreachMessage.kind == "talent_proposal",
+            OutreachMessage.status == "sent",
+            OutreachMessage.talent_id == Match.talent_id,
+            OutreachMessage.project_id == Match.project_id,
+        )
+    )
+    project_proposed = exists(
+        select(OutreachMessage.id)
+        .join(
+            OutreachMessageTalent,
+            OutreachMessageTalent.outreach_message_id == OutreachMessage.id,
+        )
+        .where(
+            OutreachMessage.kind == "project_proposal",
+            OutreachMessage.status == "sent",
+            OutreachMessage.project_id == Match.project_id,
+            OutreachMessageTalent.talent_id == Match.talent_id,
+        )
+    )
+    has_email = or_(talent_proposed, project_proposed)
+    return and_(~forced_unproposed, or_(forced_proposed, has_email))
+
+
+def _build_high_score_matches(
+    session: Session, *, min_score: int, limit: int = _HIGH_SCORE_MATCH_LIMIT
+) -> tuple[list[DashboardHighScoreMatch], int]:
+    """最新完了 match_run のうち、しきい値以上の active×open 組み合わせ。"""
+    latest_run = latest_completed_match_run(session)
+    if latest_run is None:
+        return [], 0
+    display_proposed = _high_score_display_proposed()
+    filters = (
+        Match.match_run_id == latest_run.id,
+        Match.score >= min_score,
+        Talent.status == "active",
+        Project.status == "open",
+    )
+    total = (
+        session.scalar(
+            select(func.count())
+            .select_from(Match)
+            .join(Talent, Talent.id == Match.talent_id)
+            .join(Project, Project.id == Match.project_id)
+            .where(*filters)
+        )
+        or 0
+    )
+    rows = session.execute(
+        select(
+            Match,
+            Talent,
+            Project,
+            display_proposed.label("is_proposed"),
+        )
+        .join(Talent, Talent.id == Match.talent_id)
+        .join(Project, Project.id == Match.project_id)
+        .where(*filters)
+        .order_by(Match.score.desc(), Talent.display_name, Project.title)
+        .limit(limit)
+    ).all()
+    items = [
+        DashboardHighScoreMatch(
+            match_id=str(match.id),
+            talent_id=str(talent.id),
+            talent_name=talent.display_name,
+            project_id=str(project.id),
+            project_title=project.title,
+            project_code=project.project_code,
+            score=int(match.score),
+            score_band=match.score_band,
+            proposed=bool(is_proposed),
+        )
+        for match, talent, project, is_proposed in rows
+    ]
+    return items, int(total)
+
+
 def _hard_reject_code(breakdown: object) -> str | None:
     if not isinstance(breakdown, dict):
         return None
@@ -133,7 +245,7 @@ def get_dashboard(
     talent_count = session.scalar(select(func.count()).select_from(Talent)) or 0
     project_count = session.scalar(select(func.count()).select_from(Project)) or 0
     db_settings = load_settings(session)
-    gmail_queue = fetch_gmail_ingest_queue_counts(db_settings)
+    gmail_queue = fetch_gmail_ingest_queue_counts(db_settings, session=session)
     pending_email_count = gmail_queue.pending_total
     talent_proposal_sent_count = (
         session.scalar(
@@ -315,6 +427,10 @@ def get_dashboard(
     emails_other = sum(p.emails_other for p in daily)
 
     unscored_talent_count, unscored_project_count = _unscored_entity_counts(session)
+    rule_score_min = _as_score_min(db_settings.get(SETTING_KEY_DASHBOARD_RULE_SCORE_MIN), 50)
+    high_score_matches, high_score_match_count = _build_high_score_matches(
+        session, min_score=rule_score_min
+    )
 
     return DashboardResponse(
         talent_count=int(talent_count),
@@ -351,6 +467,9 @@ def get_dashboard(
         by_company=company_rows,
         funnel=funnel,
         ok_by_score_band=ok_by_score_band,
+        rule_score_min=rule_score_min,
+        high_score_match_count=high_score_match_count,
+        high_score_matches=high_score_matches,
     )
 
 
@@ -630,3 +749,48 @@ def _build_ok_by_score_band(
     ]
     rows.sort(key=lambda r: (-r.proposed_count, r.score_band))
     return rows
+
+
+def _parse_uuid(value: str, field_name: str) -> UUID:
+    try:
+        return UUID(value)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "ERR-0001", "error_message": f"不正な {field_name} です。"},
+        ) from exc
+
+
+@router.post("/high-score-matches/display", response_model=SetHighScoreMatchDisplayResponse)
+def set_high_score_match_display(
+    body: SetHighScoreMatchDisplayRequest,
+    session: Session = Depends(get_db),
+) -> SetHighScoreMatchDisplayResponse:
+    """一覧の「未提案 / 提案済み」表示だけを切り替える。提案メールは残す。"""
+    talent_id = _parse_uuid(body.talent_id, "talent_id")
+    project_id = _parse_uuid(body.project_id, "project_id")
+    set_dashboard_pair_proposed(session, talent_id, project_id, proposed=body.proposed)
+    session.commit()
+    return SetHighScoreMatchDisplayResponse(
+        proposed=body.proposed,
+        talent_id=str(talent_id),
+        project_id=str(project_id),
+    )
+
+
+@router.post("/high-score-matches/hide", response_model=HideHighScoreMatchResponse)
+def hide_high_score_match(
+    body: HideHighScoreMatchRequest,
+    session: Session = Depends(get_db),
+) -> HideHighScoreMatchResponse:
+    """後方互換: 指定の人材×案件を提案済み表示にする。"""
+    talent_id = _parse_uuid(body.talent_id, "talent_id")
+    project_id = _parse_uuid(body.project_id, "project_id")
+    set_dashboard_pair_proposed(session, talent_id, project_id, proposed=True)
+    session.commit()
+    return HideHighScoreMatchResponse(
+        hidden=True,
+        talent_id=str(talent_id),
+        project_id=str(project_id),
+    )
+

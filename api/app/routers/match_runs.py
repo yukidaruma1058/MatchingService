@@ -121,7 +121,13 @@ def create_match_run(body: MatchRunCreateRequest | None = None) -> MatchRunRespo
     if project_id is not None:
         extra_env["MATCH_PROJECT_IDS"] = str(project_id)
     scoped = talent_id is not None or project_id is not None
-    timeout_seconds = 1800 if force and not scoped else 600
+    # 未スコープ増分は人材×案件の未採点が大きいと数十分かかることがある
+    if force and not scoped:
+        timeout_seconds = 1800
+    elif not scoped:
+        timeout_seconds = 3600
+    else:
+        timeout_seconds = 600
     try:
         result = run_batch_job(
             "match",

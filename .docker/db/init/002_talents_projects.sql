@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS projects (
   project_code VARCHAR(32),
   title VARCHAR(255) NOT NULL,
   required_skills JSONB NOT NULL DEFAULT '[]'::jsonb,
+  preferred_skills JSONB NOT NULL DEFAULT '[]'::jsonb,
   rate_min INTEGER,
   rate_max INTEGER,
   location VARCHAR(128),

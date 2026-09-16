@@ -35,10 +35,11 @@ services:
       - ../.env
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://matching:matching@db:5432/matching}
-      # OPENAI_API_KEY / CURSOR_API_KEY / ANTHROPIC_API_KEY は env_file のみから渡す。
+      # OPENAI_API_KEY / CURSOR_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY は env_file のみから渡す。
       # ここで ${OPENAI_API_KEY:-} と書くと、compose 補間が空のとき env_file の値を空文字で上書きする。
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
       GMAIL_CREDENTIALS_PATH: ${GMAIL_CREDENTIALS_PATH:-/secrets/credentials.json}
       GMAIL_TOKEN_PATH: ${GMAIL_TOKEN_PATH:-/secrets/token.json}
       GMAIL_OAUTH_REDIRECT_URI: ${GMAIL_OAUTH_REDIRECT_URI:-}
@@ -95,9 +96,14 @@ services:
       - ../.env
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://matching:matching@db:5432/matching}
-      # OPENAI_API_KEY / CURSOR_API_KEY / ANTHROPIC_API_KEY は env_file のみ（空の compose 補間で上書きしない）
+      # OPENAI_API_KEY / CURSOR_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY は env_file のみ（空の compose 補間で上書きしない）
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GEMINI_BATCH_SIZE: ${GEMINI_BATCH_SIZE:-20}
+      GEMINI_BATCH_PARALLEL: ${GEMINI_BATCH_PARALLEL:-10}
+      GEMINI_BATCH_WAVE_INTERVAL_SECONDS: ${GEMINI_BATCH_WAVE_INTERVAL_SECONDS:-60}
+      GEMINI_INPUT_TPM: ${GEMINI_INPUT_TPM:-250000}
       BATCH_JOB: ${BATCH_JOB:-pipeline}
       GMAIL_CREDENTIALS_PATH: ${GMAIL_CREDENTIALS_PATH:-/secrets/credentials.json}
       GMAIL_TOKEN_PATH: ${GMAIL_TOKEN_PATH:-/secrets/token.json}

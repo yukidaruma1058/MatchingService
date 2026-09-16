@@ -20,6 +20,7 @@ DEFAULT_SKILL_GROUPS: list[tuple[str, int, list[str]]] = [
     ("開発言語", 10, ["Java", "Kotlin", "TypeScript", "Python"]),
     ("環境", 20, ["AWS", "Docker", "Linux"]),
     ("フレームワーク/パッケージ", 30, ["Spring", "Vue.js", "React", "Next.js"]),
+    ("工程", 40, ["要件定義", "基本設計", "詳細設計", "製造", "単体試験", "結合試験", "システム試験", "リリース"]),
     (UNCATEGORIZED_CATEGORY_NAME, 999, []),
 ]
 

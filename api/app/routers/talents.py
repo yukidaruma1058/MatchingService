@@ -15,7 +15,11 @@ from sqlalchemy.orm import Session
 from app.batch_runner import BatchRunTimeoutError, read_last_batch_error, run_batch_job, start_batch_job
 from app.deps import get_db
 from app.entity_delete import delete_talent_cascade
-from app.manual_entity import create_manual_placeholder_email
+from app.manual_entity import (
+    create_manual_placeholder_email,
+    is_plausible_email_address,
+    normalize_manual_from_address,
+)
 from app.match_run_query import latest_completed_match_run
 from app.models import Company, Email, Match, MatchRun, OutreachMessage, OutreachReply, Project, Talent, TalentSkillSheet
 from app.outreach_status import (
@@ -95,6 +99,7 @@ class TalentCreateRequest(BaseModel):
 
     title: str = Field(..., min_length=1, max_length=255)
     body: str = Field(..., min_length=1)
+    from_address: str | None = Field(None, max_length=255)
 
 
 @dataclass(frozen=True)
@@ -341,6 +346,7 @@ def create_talent(body: TalentCreateRequest, session: Session = Depends(get_db))
     """タイトル+本文を AI 要約して人材登録する。ルール採点はバックグラウンドで実行する。"""
     title = body.title.strip()
     text = body.body.strip()
+    from_address = normalize_manual_from_address(body.from_address)
     if not title:
         raise HTTPException(
             status_code=400,
@@ -351,12 +357,18 @@ def create_talent(body: TalentCreateRequest, session: Session = Depends(get_db))
             status_code=400,
             detail={"error_code": "ERR-0001", "error_message": "本文を入力してください。"},
         )
+    if body.from_address and body.from_address.strip() and not is_plausible_email_address(from_address):
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "ERR-0001", "error_message": "メールアドレスの形式が正しくありません。"},
+        )
 
     email = create_manual_placeholder_email(
         session,
         email_type="talent",
         subject=title,
         body_text=text,
+        from_address=from_address,
     )
     email_id = email.id
     session.commit()

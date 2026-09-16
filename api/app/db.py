@@ -57,6 +57,9 @@ def ensure_schema(engine) -> None:
             "ALTER TABLE projects ADD COLUMN IF NOT EXISTS settlement_range VARCHAR(64)"
         )
         conn.exec_driver_sql(
+            "ALTER TABLE projects ADD COLUMN IF NOT EXISTS preferred_skills JSONB NOT NULL DEFAULT '[]'::jsonb"
+        )
+        conn.exec_driver_sql(
             "ALTER TABLE emails ADD COLUMN IF NOT EXISTS cc_addresses JSONB NOT NULL DEFAULT '[]'::jsonb"
         )
         conn.exec_driver_sql(
@@ -141,6 +144,9 @@ def ensure_schema(engine) -> None:
             DELETE FROM system_settings
             WHERE key IN ('auto_match_enabled', 'gmail_label_talent_reply')
             """
+        )
+        conn.exec_driver_sql(
+            "ALTER TABLE dashboard_hidden_matches ADD COLUMN IF NOT EXISTS display_as VARCHAR(16) NOT NULL DEFAULT 'proposed'"
         )
     session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     with session_factory() as session:

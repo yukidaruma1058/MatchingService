@@ -8,6 +8,7 @@ export type SettingsPayload = {
   gmail_sort_label_project: string;
   ai_assist_enabled: boolean;
   ai_judgement_top_n: number;
+  dashboard_rule_score_min: number;
   own_company_name: string;
   apply_from_address: string;
   reply_keywords_ok: string;
@@ -35,6 +36,7 @@ export type SettingsUpdatePayload = Partial<
     | "gmail_sort_label_project"
     | "ai_assist_enabled"
     | "ai_judgement_top_n"
+    | "dashboard_rule_score_min"
     | "own_company_name"
     | "apply_from_address"
     | "reply_keywords_ok"
@@ -62,6 +64,8 @@ export async function fetchSettings(): Promise<SettingsPayload> {
     gmail_sort_label_project: data.gmail_sort_label_project ?? "SES案件配信",
     ai_assist_enabled: data.ai_assist_enabled ?? false,
     ai_judgement_top_n: data.ai_judgement_top_n ?? 5,
+    dashboard_rule_score_min:
+      typeof data.dashboard_rule_score_min === "number" ? data.dashboard_rule_score_min : 50,
     own_company_name: data.own_company_name ?? "",
     apply_from_address: data.apply_from_address ?? "",
     reply_keywords_ok: data.reply_keywords_ok ?? "よろしくお願いします\n前向き\n候補として\nご提案ください",
@@ -313,7 +317,7 @@ export async function runGmailPipelineBatch(): Promise<BatchStartDto> {
         throw error;
       }
     }
-    throw new BatchRunError("ERR-0030", "メール取込・ルール採点の開始に失敗しました");
+    throw new BatchRunError("ERR-0030", "メール取込の開始に失敗しました");
   }
   return response.json() as Promise<BatchStartDto>;
 }
@@ -892,6 +896,7 @@ export type ProjectDto = {
   title: string;
   project_code: string | null;
   required_skills: string[];
+  preferred_skills?: string[];
   rate_min: number | null;
   rate_max: number | null;
   location: string | null;
@@ -978,6 +983,18 @@ export type DashboardScoreBandOkDto = {
   ok_rate: number;
 };
 
+export type DashboardHighScoreMatchDto = {
+  match_id: string;
+  talent_id: string;
+  talent_name: string;
+  project_id: string;
+  project_title: string;
+  project_code?: string | null;
+  score: number;
+  score_band?: string | null;
+  proposed?: boolean;
+};
+
 export type DashboardDto = {
   talent_count: number;
   project_count: number;
@@ -1013,6 +1030,9 @@ export type DashboardDto = {
   by_company: DashboardCompanyIngestDto[];
   funnel: DashboardFunnelDto;
   ok_by_score_band: DashboardScoreBandOkDto[];
+  rule_score_min?: number;
+  high_score_match_count?: number;
+  high_score_matches?: DashboardHighScoreMatchDto[];
 };
 
 export async function fetchDashboard(options?: {
@@ -1032,6 +1052,25 @@ export async function fetchDashboard(options?: {
     throw new Error("ダッシュボードの取得に失敗しました");
   }
   return response.json();
+}
+
+export async function setDashboardHighScoreMatchProposed(options: {
+  talentId: string;
+  projectId: string;
+  proposed: boolean;
+}): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/dashboard/high-score-matches/display`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      talent_id: options.talentId,
+      project_id: options.projectId,
+      proposed: options.proposed,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error("組み合わせの表示更新に失敗しました");
+  }
 }
 
 export async function fetchEmails(): Promise<EmailDto[]> {
@@ -1100,6 +1139,7 @@ export type TalentUpdatePayload = {
 export type TalentCreatePayload = {
   title: string;
   body: string;
+  from_address?: string;
 };
 
 async function readApiErrorMessage(response: Response, fallback: string): Promise<string> {
@@ -1164,6 +1204,7 @@ export type ProjectUpdatePayload = {
   title?: string;
   project_code?: string | null;
   required_skills?: string[];
+  preferred_skills?: string[];
   rate_min?: number | null;
   rate_max?: number | null;
   location?: string | null;
@@ -1183,6 +1224,7 @@ export type ProjectUpdatePayload = {
 export type ProjectCreatePayload = {
   title: string;
   body: string;
+  from_address?: string;
 };
 
 export async function createProject(body: ProjectCreatePayload): Promise<ProjectDto> {
@@ -1779,14 +1821,31 @@ export function formatScoreBreakdownLines(
 
   const skill = asNum("skill");
   if (skill != null) {
+    const requiredPoints = asNum("skill_required");
+    const preferredPoints = asNum("skill_preferred");
     const hits = Array.isArray(breakdown.skill_hits)
       ? breakdown.skill_hits.map(String).filter(Boolean)
       : [];
-    lines.push(`スキル: ${skill}/40${hits.length ? `（一致: ${hits.join(", ")}）` : ""}`);
+    const preferredHits = Array.isArray(breakdown.preferred_hits)
+      ? breakdown.preferred_hits.map(String).filter(Boolean)
+      : [];
+    lines.push(`スキル: ${skill}/45`);
+    if (requiredPoints != null) {
+      lines.push(
+        `必須: ${requiredPoints}/30${hits.length ? `（一致: ${hits.join(", ")}）` : ""}`,
+      );
+    } else if (hits.length) {
+      lines.push(`一致: ${hits.join(", ")}`);
+    }
+    if (preferredPoints != null) {
+      lines.push(
+        `尚可: ${preferredPoints}/15${preferredHits.length ? `（一致: ${preferredHits.join(", ")}）` : ""}`,
+      );
+    }
   }
   const rate = asNum("rate");
   if (rate != null) {
-    lines.push(`単価: ${rate}/25`);
+    lines.push(`単価: ${rate}/30`);
   }
   const availability = asNum("availability");
   if (availability != null) {

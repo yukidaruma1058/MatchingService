@@ -40,7 +40,13 @@ class Settings(BaseSettings):
     cursor_api_key: str = ""  # Cursor SDK / エージェント用（CURSOR_API_KEY）
     anthropic_api_key: str = ""  # Claude API（ANTHROPIC_API_KEY）
     anthropic_model: str = "claude-haiku-4-5-20251001"
-    # BAT-002 要約 / BAT-004 AI判定の LLM 並列度（1=直列、推奨 3〜4、上限 8）
+    gemini_api_key: str = ""  # Google AI Studio / Gemini API（GEMINI_API_KEY）
+    gemini_model: str = "gemini-2.5-flash"
+    gemini_batch_size: int = 20  # BAT-002 メール要約の1リクエストあたり通数
+    gemini_batch_parallel: int = 10  # 1波の同時20通パック数（人材+案件合計。両ラベル時は半分ずつ）
+    gemini_batch_wave_interval_seconds: int = 60  # TPM 超過時に直列再送するまでの待機秒
+    gemini_input_tpm: int = 250000  # 無料枠の入力 TPM。再送を即時にするかの判定に使う
+    # BAT-002 要約の最終1通フォールバック / BAT-004 AI判定の LLM 並列度（1=直列、推奨 3〜4、上限 8）
     # 実効値は API レート制限次第。429 が出る場合は下げる。
     ai_concurrency: int = 3
 

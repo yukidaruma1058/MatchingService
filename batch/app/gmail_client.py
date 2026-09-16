@@ -58,6 +58,8 @@ class GmailMessage:
     body_text: str
     body_html: str
     from_header: str = ""  # From 生ヘッダー（表示名付き）
+    reply_to_address: str = ""  # Reply-To のアドレス部分
+    reply_to_header: str = ""  # Reply-To 生ヘッダー
     to_addresses: tuple[str, ...] = ()
     cc_addresses: tuple[str, ...] = ()
 
@@ -177,28 +179,57 @@ class GmailClient:
             )
         except HttpError as exc:
             raise GmailConfigError("ERR-0021", f"Failed to fetch Gmail message: {message_id}") from exc
+        return _gmail_message_from_raw(raw, message_id=message_id)
 
-        payload = raw.get("payload", {})
-        headers = {h["name"].lower(): h["value"] for h in payload.get("headers", [])}
-        body_text, body_html = _extract_bodies(payload)
-        received_at = _parse_internal_date(raw.get("internalDate"))
+    def fetch_messages(
+        self, message_ids: list[str], *, chunk_size: int = 20
+    ) -> list[tuple[str, GmailMessage | None, BaseException | None]]:
+        """複数メールを BatchHttpRequest で取得する。入力順を維持する（既定 20 件ずつ）。"""
+        if not message_ids:
+            return []
+        size = max(1, min(100, int(chunk_size)))
+        collected: dict[str, tuple[GmailMessage | None, BaseException | None]] = {}
 
-        raw_from = headers.get("from", "unknown@unknown")
-        from app.proposal_cc import parse_address_list
+        def _callback(request_id: str, response: Any, exception: Exception | None) -> None:
+            if exception is not None:
+                collected[request_id] = (None, exception)
+                return
+            try:
+                collected[request_id] = (_gmail_message_from_raw(response, message_id=request_id), None)
+            except BaseException as exc:  # noqa: BLE001
+                collected[request_id] = (None, exc)
 
-        return GmailMessage(
-            message_id=message_id,
-            thread_id=raw.get("threadId"),
-            label_ids=raw.get("labelIds", []),
-            subject=headers.get("subject", "(no subject)"),
-            from_address=_extract_email_address(raw_from),
-            from_header=raw_from.strip()[:255],
-            received_at=received_at,
-            body_text=body_text,
-            body_html=body_html,
-            to_addresses=tuple(parse_address_list(headers.get("to"))),
-            cc_addresses=tuple(parse_address_list(headers.get("cc"))),
-        )
+        from googleapiclient.http import BatchHttpRequest
+
+        for offset in range(0, len(message_ids), size):
+            chunk = message_ids[offset : offset + size]
+            batch = self.service.new_batch_http_request(callback=_callback)
+            if not isinstance(batch, BatchHttpRequest):
+                batch = BatchHttpRequest(callback=_callback)
+            for message_id in chunk:
+                batch.add(
+                    self.service.users().messages().get(userId="me", id=message_id, format="full"),
+                    request_id=message_id,
+                )
+            try:
+                with self._api_lock:
+                    batch.execute()
+            except HttpError as exc:
+                for message_id in chunk:
+                    if message_id not in collected:
+                        collected[message_id] = (
+                            None,
+                            GmailConfigError("ERR-0021", f"Failed to fetch Gmail message: {message_id}"),
+                        )
+
+        out: list[tuple[str, GmailMessage | None, BaseException | None]] = []
+        for message_id in message_ids:
+            message, error = collected.get(
+                message_id,
+                (None, GmailConfigError("ERR-0021", f"Failed to fetch Gmail message: {message_id}")),
+            )
+            out.append((message_id, message, error))
+        return out
 
     def relabel_message(
         self,
@@ -211,6 +242,24 @@ class GmailClient:
 
         追加側は未作成なら作成する。削除側は未作成ラベルは無視する。
         """
+        self.relabel_messages(
+            [message_id],
+            add_label_names=add_label_names,
+            remove_label_names=remove_label_names,
+        )
+
+    def relabel_messages(
+        self,
+        message_ids: list[str],
+        *,
+        add_label_names: list[str],
+        remove_label_names: list[str],
+        chunk_size: int = 1000,
+    ) -> None:
+        """複数メールのラベルを batchModify で付け替える。"""
+        ids = [mid for mid in message_ids if (mid or "").strip()]
+        if not ids:
+            return
         add_ids = [self.ensure_label(name) for name in add_label_names if (name or "").strip()]
         remove_ids = [
             self._label_name_to_id[name]
@@ -219,16 +268,25 @@ class GmailClient:
         ]
         if not add_ids and not remove_ids:
             return
-        try:
-            self._execute(
-                self.service.users().messages().modify(
-                    userId="me",
-                    id=message_id,
-                    body={"addLabelIds": add_ids, "removeLabelIds": remove_ids},
+        size = max(1, min(1000, int(chunk_size)))
+        for offset in range(0, len(ids), size):
+            chunk = ids[offset : offset + size]
+            try:
+                self._execute(
+                    self.service.users().messages().batchModify(
+                        userId="me",
+                        body={
+                            "ids": chunk,
+                            "addLabelIds": add_ids,
+                            "removeLabelIds": remove_ids,
+                        },
+                    )
                 )
-            )
-        except HttpError as exc:
-            raise GmailConfigError("ERR-0021", f"Failed to modify Gmail labels: {message_id}") from exc
+            except HttpError as exc:
+                raise GmailConfigError(
+                    "ERR-0021",
+                    f"Failed to modify Gmail labels: {chunk[0]}",
+                ) from exc
 
     def has_any_label(self, label_ids: list[str], label_names: list[str]) -> bool:
         """メールが指定ラベルのいずれかを既に持っているか判定する（再処理防止）。"""
@@ -446,6 +504,35 @@ class GmailClient:
         except Exception:
             pass
         return str(message_id)
+
+
+def _gmail_message_from_raw(raw: dict[str, Any], *, message_id: str) -> GmailMessage:
+    payload = raw.get("payload", {}) or {}
+    headers = {h["name"].lower(): h["value"] for h in payload.get("headers", [])}
+    body_text, body_html = _extract_bodies(payload)
+    received_at = _parse_internal_date(raw.get("internalDate"))
+    raw_from = headers.get("from", "unknown@unknown")
+    raw_reply_to = (headers.get("reply-to") or "").strip()
+    # 複数 Reply-To 時は先頭を使う（resolve_reply_recipient と同じ）
+    if raw_reply_to and "," in raw_reply_to:
+        raw_reply_to = raw_reply_to.split(",", 1)[0].strip()
+    from app.proposal_cc import parse_address_list
+
+    return GmailMessage(
+        message_id=str(raw.get("id") or message_id),
+        thread_id=raw.get("threadId"),
+        label_ids=raw.get("labelIds", []) or [],
+        subject=headers.get("subject", "(no subject)"),
+        from_address=_extract_email_address(raw_from),
+        from_header=raw_from.strip()[:255],
+        reply_to_address=_extract_email_address(raw_reply_to) if raw_reply_to else "",
+        reply_to_header=raw_reply_to[:255] if raw_reply_to else "",
+        received_at=received_at,
+        body_text=body_text,
+        body_html=body_html,
+        to_addresses=tuple(parse_address_list(headers.get("to"))),
+        cc_addresses=tuple(parse_address_list(headers.get("cc"))),
+    )
 
 
 def _extract_bodies(payload: dict[str, Any]) -> tuple[str, str]:

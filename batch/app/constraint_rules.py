@@ -34,8 +34,11 @@ def parse_project_foreign_nationality_ng(raw: Any) -> bool | None:
         )
     ):
         return True
-    # 【外国籍】：不可 / 可 のような短い値
-    if text in ("不可", "ng", "ｎｇ", "×", "x"):
+    # 【国籍】：日本 / 国籍： 日本 など、括弧・空白ゆれを吸収
+    if re.search(r"国籍\s*[】]?\s*[:：]?\s*日本", text):
+        return True
+    # 【外国籍】：不可 / 【国籍】日本 のような短い値
+    if text in ("不可", "ng", "ｎｇ", "×", "x", "日本", "日本人", "日本国籍"):
         return True
     if text in ("可", "ok", "ｏｋ", "不問", "○", "o"):
         return False
@@ -217,16 +220,13 @@ def hard_constraint_reject_reason(
     talent_commerce_flow: str | None,
     talent_affiliation: str | None,
 ) -> str | None:
-    """不一致なら拒否理由コードを返す。OK なら None。"""
+    """不一致なら拒否理由コードを返す。OK なら None。
+
+    商流制限は足切りしない（支援非対応のため）。外国籍不可のみ 0 点にする。
+    """
+    _ = (project_commerce_flow_limit, talent_commerce_flow, talent_affiliation)
     if project_foreign_nationality_ng and talent_is_foreign_national is True:
         return "foreign_nationality"
-    max_depth = parse_commerce_flow_max_depth(project_commerce_flow_limit)
-    talent_depth = parse_talent_commerce_depth(
-        commerce_flow=talent_commerce_flow,
-        affiliation=talent_affiliation,
-    )
-    if max_depth is not None and talent_depth is not None and talent_depth > max_depth:
-        return "commerce_flow"
     return None
 
 
@@ -241,6 +241,8 @@ def evaluate_match_hard_constraints(
     project_commerce_flow_limit: str | None,
 ) -> tuple[str | None, str]:
     """ルール採点・AI採点共用のハード制約判定。
+
+    商流制限は足切りしない。adjusted は提案・プロンプト用に返す。
 
     Returns:
         (拒否コード or None, 自社視点の商流文字列)
@@ -275,8 +277,9 @@ def extract_project_constraint_fields(fields: dict[str, str], body: str) -> tupl
     for key, value in fields.items():
         nk = _norm(key)
         if any(k in nk for k in ("外国籍", "国籍", "外国人")):
-            # 「【外国籍】不可」のようにキーと値が分かれていても判定できるようにする
-            from_keys += f" {key}{value} {value}"
+            # 「【国籍】日本」「【外国籍】不可」のようにキーと値が分かれていても判定できるようにする
+            # コロン付きも入れ、parse 側の「国籍:日本」キーワードに載せられるようにする
+            from_keys += f" {key}:{value} {key}{value} {value}"
     foreign_ng = parse_project_foreign_nationality_ng(from_keys)
     if foreign_ng is None:
         foreign_ng = parse_project_foreign_nationality_ng(body)

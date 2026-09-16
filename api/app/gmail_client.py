@@ -94,14 +94,10 @@ class GmailClient:
         if missing:
             raise GmailConfigError("ERR-0020", f"Gmail label not found: {', '.join(missing)}")
 
-    def count_messages_with_label(self, label_name: str, *, max_count: int = 1000) -> tuple[int, bool]:
-        """指定ラベルのメール件数を返す。
-
-        Returns:
-            (件数, 上限打ち切りか)。max_count に達したら打ち切り True。
-        """
+    def list_message_ids_with_label(self, label_name: str, *, max_results: int = 1000) -> list[str]:
+        """指定ラベルが付いたメールの ID 一覧を取得する（ページング対応）。"""
         label_id = self.label_id(label_name)
-        count = 0
+        message_ids: list[str] = []
         page_token = None
         while True:
             try:
@@ -112,22 +108,34 @@ class GmailClient:
                         userId="me",
                         labelIds=[label_id],
                         pageToken=page_token,
-                        maxResults=min(100, max(1, max_count - count)),
+                        maxResults=min(100, max(1, max_results - len(message_ids))),
                     )
                 )
             except HttpError as exc:
                 raise GmailConfigError(
-                    "ERR-0021", f"Failed to count Gmail messages for label: {label_name}"
+                    "ERR-0021", f"Failed to list Gmail messages for label: {label_name}"
                 ) from exc
 
-            batch = response.get("messages") or []
-            count += len(batch)
-            if count >= max_count:
-                return max_count, True
+            for item in response.get("messages") or []:
+                message_ids.append(item["id"])
+                if len(message_ids) >= max_results:
+                    return message_ids
+
             page_token = response.get("nextPageToken")
-            if not page_token or not batch:
+            if not page_token:
                 break
-        return count, False
+        return message_ids
+
+    def count_messages_with_label(self, label_name: str, *, max_count: int = 1000) -> tuple[int, bool]:
+        """指定ラベルのメール件数を返す。
+
+        Returns:
+            (件数, 上限打ち切りか)。max_count に達したら打ち切り True。
+        """
+        ids = self.list_message_ids_with_label(label_name, max_results=max_count)
+        if len(ids) >= max_count:
+            return max_count, True
+        return len(ids), False
 
     def relabel_message(
         self,

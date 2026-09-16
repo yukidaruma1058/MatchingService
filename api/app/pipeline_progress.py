@@ -30,6 +30,9 @@ _LABEL_TYPE_TO_STEP = {
     "talent": "ingest_talent",
     "project": "ingest_project",
 }
+_INGEST_DISPLAY_STEPS = ("ingest_talent", "ingest_project")
+_HIDDEN_PIPELINE_STEPS = {"ai_judge"}
+_DEFAULT_PIPELINE_STEPS = ["ingest_talent", "ingest_project", "cleanup", "reply_sync", "match"]
 
 
 @dataclass
@@ -209,6 +212,27 @@ def _normalize_weights(step_ids: list[str]) -> dict[str, float]:
     return {step_id: weight / total for step_id, weight in raw.items()}
 
 
+def _display_pipeline_steps(steps: list[str]) -> list[str]:
+    """ingest を人材/案件に展開し、取込パイプラインから AI 判定を外す。"""
+    out: list[str] = []
+    seen: set[str] = set()
+    for step in steps:
+        parts = list(_INGEST_DISPLAY_STEPS) if step == "ingest" else [step]
+        for item in parts:
+            if item in _HIDDEN_PIPELINE_STEPS or item in seen:
+                continue
+            seen.add(item)
+            out.append(item)
+    return out
+
+
+def _mark_step_running(state: _StepRuntime, ts: datetime | None) -> None:
+    if state.status == "pending":
+        state.status = "running"
+    if state.started_at is None:
+        state.started_at = ts
+
+
 def _ingest_step_progress(state: _StepRuntime) -> tuple[int, str | None]:
     if state.status == "completed":
         return 100, state.detail
@@ -330,19 +354,24 @@ def parse_pipeline_progress(job_id: str, *, log_path: Path | None = None) -> Pip
             step_id = extra.get("step")
             if isinstance(step_id, str):
                 current_step_id = step_id
-                state = step_states.setdefault(step_id, _StepRuntime())
-                state.status = "running"
-                state.started_at = ts
+                targets = list(_INGEST_DISPLAY_STEPS) if step_id == "ingest" else [step_id]
+                for item in targets:
+                    state = step_states.setdefault(item, _StepRuntime())
+                    state.status = "running"
+                    state.started_at = ts
         elif event == "batch.pipeline.step_finished":
             step_id = extra.get("step")
             if isinstance(step_id, str):
-                state = step_states.setdefault(step_id, _StepRuntime())
-                state.status = "failed" if extra.get("exit_code") not in (0, None) else "completed"
-                state.finished_at = ts
-                duration_ms = row.get("duration_ms")
-                if isinstance(duration_ms, int):
-                    state.duration_ms = duration_ms
-                if extra.get("exit_code") not in (0, None):
+                failed = extra.get("exit_code") not in (0, None)
+                targets = list(_INGEST_DISPLAY_STEPS) if step_id == "ingest" else [step_id]
+                for item in targets:
+                    state = step_states.setdefault(item, _StepRuntime())
+                    state.status = "failed" if failed else "completed"
+                    state.finished_at = ts
+                    duration_ms = row.get("duration_ms")
+                    if isinstance(duration_ms, int):
+                        state.duration_ms = duration_ms
+                if failed:
                     progress.status = "failed"
                     pipeline_status = "failed"
                     progress.error_code = (
@@ -357,6 +386,7 @@ def parse_pipeline_progress(job_id: str, *, log_path: Path | None = None) -> Pip
             label_type = extra.get("label_type")
             step_id = _LABEL_TYPE_TO_STEP.get(str(label_type), current_step_id or "ingest")
             state = step_states.setdefault(step_id, _StepRuntime())
+            _mark_step_running(state, ts)
             if isinstance(extra.get("listed"), int):
                 state.listed = max(state.listed, int(extra["listed"]))
             if isinstance(extra.get("targets"), int):
@@ -371,6 +401,7 @@ def parse_pipeline_progress(job_id: str, *, log_path: Path | None = None) -> Pip
             label_type = extra.get("label_type")
             step_id = _LABEL_TYPE_TO_STEP.get(str(label_type), current_step_id or "ingest")
             state = step_states.setdefault(step_id, _StepRuntime())
+            _mark_step_running(state, ts)
             if isinstance(extra.get("done"), int):
                 state.fetch_done = max(state.fetch_done, int(extra["done"]))
             if isinstance(extra.get("total"), int):
@@ -379,14 +410,16 @@ def parse_pipeline_progress(job_id: str, *, log_path: Path | None = None) -> Pip
             label_type = extra.get("label_type")
             step_id = _LABEL_TYPE_TO_STEP.get(str(label_type), current_step_id or "ingest")
             state = step_states.setdefault(step_id, _StepRuntime())
+            _mark_step_running(state, ts)
             if isinstance(extra.get("done"), int):
                 state.ai_done = max(state.ai_done, int(extra["done"]))
             if isinstance(extra.get("total"), int):
                 state.ai_total = max(state.ai_total, int(extra["total"]))
-        elif event == "gmail_ingest.message_fetched":
+        elif event in {"gmail_ingest.message_fetched", "gmail_ingest.message_ingested"}:
             label_type = extra.get("label_type")
             step_id = _LABEL_TYPE_TO_STEP.get(str(label_type), current_step_id or "ingest")
             state = step_states.setdefault(step_id, _StepRuntime())
+            _mark_step_running(state, ts)
             state.persist_done += 1
             ingested_total += 1
         elif event == "gmail_ingest.finished":
@@ -490,8 +523,7 @@ def parse_pipeline_progress(job_id: str, *, log_path: Path | None = None) -> Pip
                         f"{_STEP_META.get(failed_step, {}).get('label', failed_step)}で失敗しました"
                     )
 
-    if not enabled_steps:
-        enabled_steps = ["ingest_talent", "ingest_project", "cleanup", "match", "reply_sync"]
+    enabled_steps = _display_pipeline_steps(enabled_steps) if enabled_steps else list(_DEFAULT_PIPELINE_STEPS)
 
     weights = _normalize_weights(enabled_steps)
     now = datetime.now(UTC)

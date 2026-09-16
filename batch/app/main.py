@@ -4,8 +4,8 @@
 ジョブ名とバッチ ID の対応:
   - ``ingest`` → BAT-002（メール取込・要約）
   - ``manual_register`` → BAT-002（画面のタイトル+本文から AI 要約登録。MANUAL_EMAIL_ID 必須）
-  - ``pipeline`` → BAT-002 → BAT-006 → BAT-003 →（設定ONなら BAT-004＝スキルシート取込+AI判定）→ BAT-008
-    （取込・採点・任意でAI判定・返信同期。スキルシートは AI 判定時に対象人材のみ取込）
+  - ``pipeline`` → BAT-002 → BAT-006 → BAT-008 → BAT-003
+    （人材/案件並列取込・要約・返信同期・未採点ルール採点。AI 判定は詳細画面）
   - ``cleanup`` → BAT-006（取込データ削除）
   - ``match`` → BAT-003（ルールスコア採点）
   - ``talent_propose`` → BAT-007（要員側へ案件提案・手動）
@@ -26,28 +26,6 @@ from typing import Any
 from uuid import UUID
 
 _BATCH_ROOT = Path(__file__).resolve().parent.parent
-
-
-def _is_ai_assist_enabled() -> bool:
-    """system_settings.ai_assist_enabled を読む。"""
-    from app.config import settings as app_settings
-    from app.db_bootstrap import create_session_factory, ensure_schema
-    from app.models import SystemSetting
-
-    session_factory, engine = create_session_factory(app_settings.database_url)
-    ensure_schema(engine)
-    with session_factory() as session:
-        row = session.get(SystemSetting, "ai_assist_enabled")
-        if row is None or row.value is None:
-            return False
-        value = row.value
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, (int, float)):
-            return bool(value)
-        if isinstance(value, str):
-            return value.strip().lower() in {"1", "true", "yes", "on"}
-        return bool(value)
 
 
 def _ensure_batch_path(folder_name: str) -> None:
@@ -198,7 +176,7 @@ def run(job: str, *, match_trigger: str = "manual") -> int:
         return 0 if result.ok else 1
 
     if job == "pipeline":
-        # 基本セット: 人材取込 → 案件取込 → BAT-006 → BAT-003 →（任意 BAT-004・スキルシート取込含む）→ BAT-008
+        # 人材+案件並列取込 → 掃除 → 返信同期 → 未採点ルール採点
         import os
         import time
         import uuid as _uuid
@@ -207,16 +185,12 @@ def run(job: str, *, match_trigger: str = "manual") -> int:
         os.environ["PIPELINE_JOB_ID"] = pipeline_job_id
         pipeline_started = time.perf_counter()
         step_timings: list[dict[str, object]] = []
-        ai_enabled = _is_ai_assist_enabled()
         pipeline_step_defs: list[tuple[str, str, dict[str, str]]] = [
-            ("ingest_talent", "ingest", {"INGEST_SCOPE": "talent"}),
-            ("ingest_project", "ingest", {"INGEST_SCOPE": "project"}),
+            ("ingest", "ingest", {"INGEST_SCOPE": "all"}),
             ("cleanup", "cleanup", {}),
+            ("reply_sync", "reply_sync", {}),
             ("match", "match", {}),
         ]
-        if ai_enabled:
-            pipeline_step_defs.append(("ai_judge", "ai_judge", {}))
-        pipeline_step_defs.append(("reply_sync", "reply_sync", {}))
 
         def _run_pipeline_step(step_id: str, job_name: str, extra_env: dict[str, str]) -> int:
             for key, value in extra_env.items():
@@ -271,7 +245,6 @@ def run(job: str, *, match_trigger: str = "manual") -> int:
             module_name="app.main",
             extra={
                 "steps": [step_id for step_id, _, _ in pipeline_step_defs],
-                "ai_assist_enabled": ai_enabled,
             },
         )
 
@@ -367,7 +340,7 @@ def run(job: str, *, match_trigger: str = "manual") -> int:
                 module_name="BAT-003.match_score",
             )
             return 1
-        return 0 if stats.match_count > 0 else 1
+        return 0
 
     if job == "talent_propose":
         try:

@@ -28,6 +28,16 @@ class ProjectForeignNationalityTests(unittest.TestCase):
         self.assertFalse(parse_project_foreign_nationality_ng("外国籍可"))
         self.assertFalse(parse_project_foreign_nationality_ng("可"))
 
+    def test_parse_nationality_japan_variants(self) -> None:
+        self.assertTrue(parse_project_foreign_nationality_ng("国籍：日本"))
+        self.assertTrue(parse_project_foreign_nationality_ng("国籍:日本"))
+        self.assertTrue(parse_project_foreign_nationality_ng("国籍： 日本"))
+        self.assertTrue(parse_project_foreign_nationality_ng("国籍 : 日本"))
+        self.assertTrue(parse_project_foreign_nationality_ng("【国籍】：日本"))
+        self.assertTrue(parse_project_foreign_nationality_ng("【国籍】日本"))
+        self.assertTrue(parse_project_foreign_nationality_ng("日本"))
+        self.assertTrue(parse_project_foreign_nationality_ng("日本人"))
+
     def test_extract_without_mention_is_none(self) -> None:
         body = """
 【案件名】：飲料メーカー向け保守
@@ -50,6 +60,18 @@ class ProjectForeignNationalityTests(unittest.TestCase):
         body = "本文に日本人のみという言葉があるが項目が優先"
         foreign_ng, _ = extract_project_constraint_fields(fields, body)
         self.assertFalse(foreign_ng)
+
+    def test_extract_bracket_nationality_japan(self) -> None:
+        body = "【国籍】：日本\n【商流】：一社先まで"
+        fields = {"国籍": "日本", "商流": "一社先まで"}
+        foreign_ng, commerce = extract_project_constraint_fields(fields, body)
+        self.assertTrue(foreign_ng)
+        self.assertEqual(commerce, "一社先まで")
+
+    def test_extract_body_only_bracket_nationality_japan(self) -> None:
+        body = "【案件名】：テスト\n【国籍】：日本\n【必要スキル】：Java"
+        foreign_ng, _ = extract_project_constraint_fields({}, body)
+        self.assertTrue(foreign_ng)
 
 
 if __name__ == "__main__":

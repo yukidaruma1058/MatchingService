@@ -1,6 +1,6 @@
 """BAT-003: ルールスコア採点ロジック（Google API 非依存）。
 
-配点: スキル40 / 単価25 / 稼働15 / 勤務形態10 / 通勤10 = 100
+配点: スキル45（必須30 / 尚可15） / 単価30 / 稼働15 / 勤務形態10 = 100
 """
 
 from __future__ import annotations
@@ -9,6 +9,8 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from typing import Any
+
+from app.skill_terms import expand_skill_items, expand_skills_from_text
 
 _SKILL_ALIASES: dict[str, str] = {
     "js": "javascript",
@@ -28,6 +30,9 @@ _SKILL_ALIASES: dict[str, str] = {
 
 _REMOTE_HINTS = ("リモート", "remote", "在宅", "フルリモート", "テレワーク")
 _ONSITE_HINTS = ("常駐", "出社", "オンサイト", "onsite", "出社必須", "客先")
+
+REQUIRED_SKILL_MAX = 30
+PREFERRED_SKILL_MAX = 15
 
 
 @dataclass(frozen=True)
@@ -81,37 +86,55 @@ def score_band_for(score: int) -> str:
     return f"{low}-{low + 9}"
 
 
-def score_skills(talent_skills: list[Any] | None, required: list[Any] | None) -> tuple[int, list[str]]:
-    req = normalize_skills(required)
-    have = set(normalize_skills(talent_skills))
+def prepare_talent_skills(talent_skills: list[Any] | None, talent_summary: str | None = None) -> list[str]:
+    """スキル欄と要約から、照合用に正規化したスキル一覧を1回だけ作る。"""
+    return normalize_skills(
+        expand_skill_items(list(talent_skills or []) + expand_skills_from_text(talent_summary))
+    )
+
+
+def prepare_project_skills(skills: list[Any] | None) -> list[str]:
+    """案件の必須／尚可スキルを照合用に正規化する。"""
+    return normalize_skills(expand_skill_items(skills))
+
+
+def score_skills(
+    talent_skills: list[Any] | None,
+    required: list[Any] | None,
+    *,
+    max_points: int = REQUIRED_SKILL_MAX,
+    prepared: bool = False,
+) -> tuple[int, list[str]]:
+    req = list(required or []) if prepared else normalize_skills(expand_skill_items(required))
+    have = set(talent_skills or []) if prepared else set(normalize_skills(expand_skill_items(talent_skills)))
     if not req:
-        return 20, []
+        return max_points // 2, []
     if not have:
         return 0, []
     # 部分文字列（includes）ベースだと `java` が `javascript` に誤ヒットするため、
     # 「空白区切りトークンの包含」で照合する。
     hits = [skill for skill in req if skill in have or any(_tokens_subset(skill, h) for h in have)]
     ratio = len(hits) / len(req)
-    return int(round(40 * ratio)), hits
+    return int(round(max_points * ratio)), hits
 
 
 def score_rate(desired: int | None, rate_min: int | None, rate_max: int | None) -> int:
     if desired is None or (rate_min is None and rate_max is None):
-        return 12
+        return 17
     lo = rate_min if rate_min is not None else rate_max
     hi = rate_max if rate_max is not None else rate_min
     assert lo is not None and hi is not None
     if lo > hi:
         lo, hi = hi, lo
     if lo <= desired <= hi:
-        return 25
+        return 30
     if desired < lo:
-        return 22
+        return 27
     over = desired - hi
     if over <= 5:
-        return 18
+        return 23
     if over <= 10:
-        return 10
+        return 15
     return 0
 
 
@@ -186,35 +209,22 @@ def is_full_remote(project_ws: str | None) -> bool:
     )
 
 
-def score_commute_minutes(minutes: int | None, *, full_remote: bool = False) -> int:
-    if full_remote:
-        return 10
-    if minutes is None:
-        return 5
-    if minutes <= 45:
-        return 10
-    if minutes <= 60:
-        return 8
-    if minutes <= 90:
-        return 5
-    if minutes <= 120:
-        return 2
-    return 0
-
-
 def score_pair(
     *,
-    talent_skills: list[Any] | None,
-    required_skills: list[Any] | None,
-    desired_rate: int | None,
-    rate_min: int | None,
-    rate_max: int | None,
-    available_from: str | None,
-    start_date: str | None,
-    talent_work_style: str | None,
-    project_work_style: str | None,
-    commute_minutes: int | None = None,
-    commute_resolved: bool = False,
+    talent_skills: list[Any] | None = None,
+    required_skills: list[Any] | None = None,
+    preferred_skills: list[Any] | None = None,
+    talent_summary: str | None = None,
+    talent_skills_prepared: list[str] | None = None,
+    required_skills_prepared: list[str] | None = None,
+    preferred_skills_prepared: list[str] | None = None,
+    desired_rate: int | None = None,
+    rate_min: int | None = None,
+    rate_max: int | None = None,
+    available_from: str | None = None,
+    start_date: str | None = None,
+    talent_work_style: str | None = None,
+    project_work_style: str | None = None,
     project_foreign_nationality_ng: bool = False,
     talent_is_foreign_national: bool | None = None,
     project_commerce_flow_limit: str | None = None,
@@ -223,9 +233,8 @@ def score_pair(
 ) -> ScoreResult:
     """1 人材×1 案件を採点する。
 
-    commute_resolved=False のとき通勤は中立 5（Pass1）。
-    full remote は commute_resolved に関わらず 10。
-    外国籍不可・商流制限に抵触する場合は合計 0 点。
+    外国籍不可に抵触する場合は合計 0 点。商流制限は足切りしない。
+    通勤は配点に含めない。prepared スキルを渡すと正規化を省略する。
     """
     from app.constraint_rules import hard_constraint_reject_reason, hard_reject_label
 
@@ -246,39 +255,73 @@ def score_pair(
                 "rate": 0,
                 "availability": 0,
                 "work_style": 0,
-                "commute": 0,
                 "skill_hits": [],
+                "preferred_hits": [],
+                "skill_required": 0,
+                "skill_preferred": 0,
                 "hard_reject": reject,
                 "hard_reject_label": label,
             },
         )
 
-    skill, hits = score_skills(talent_skills, required_skills)
+    have = talent_skills_prepared if talent_skills_prepared is not None else prepare_talent_skills(
+        talent_skills, talent_summary
+    )
+    required = (
+        required_skills_prepared
+        if required_skills_prepared is not None
+        else prepare_project_skills(required_skills)
+    )
+    preferred = (
+        preferred_skills_prepared
+        if preferred_skills_prepared is not None
+        else prepare_project_skills(preferred_skills)
+    )
+    required_points, hits = score_skills(have, required, max_points=REQUIRED_SKILL_MAX, prepared=True)
+    preferred_points, preferred_hits = score_skills(
+        have, preferred, max_points=PREFERRED_SKILL_MAX, prepared=True
+    )
+    skill = required_points + preferred_points
     rate = score_rate(desired_rate, rate_min, rate_max)
     availability = score_availability(available_from, start_date)
     work = score_work_style(talent_work_style, project_work_style)
-    remote = is_full_remote(project_work_style)
-    if remote:
-        commute = 10
-        minutes_out: int | None = None
-    elif not commute_resolved:
-        commute = 5
-        minutes_out = None
-    else:
-        commute = score_commute_minutes(commute_minutes, full_remote=False)
-        minutes_out = commute_minutes
-
-    total = max(0, min(100, skill + rate + availability + work + commute))
+    total = max(0, min(100, skill + rate + availability + work))
     breakdown: dict[str, Any] = {
         "skill": skill,
         "rate": rate,
         "availability": availability,
         "work_style": work,
-        "commute": commute,
         "skill_hits": hits,
+        "preferred_hits": preferred_hits,
+        "skill_required": required_points,
+        "skill_preferred": preferred_points,
     }
-    if minutes_out is not None:
-        breakdown["commute_minutes"] = minutes_out
-    if remote:
-        breakdown["commute_skip"] = "full_remote"
     return ScoreResult(score=total, score_band=score_band_for(total), breakdown=breakdown)
+
+
+def score_pair_job(payload: dict[str, Any]) -> dict[str, Any]:
+    """プロセス並列用。pickle 可能な dict を受けて採点結果 dict を返す。"""
+    result = score_pair(
+        talent_skills_prepared=payload.get("talent_skills_prepared"),
+        required_skills_prepared=payload.get("required_skills_prepared"),
+        preferred_skills_prepared=payload.get("preferred_skills_prepared"),
+        desired_rate=payload.get("desired_rate"),
+        rate_min=payload.get("rate_min"),
+        rate_max=payload.get("rate_max"),
+        available_from=payload.get("available_from"),
+        start_date=payload.get("start_date"),
+        talent_work_style=payload.get("talent_work_style"),
+        project_work_style=payload.get("project_work_style"),
+        project_foreign_nationality_ng=bool(payload.get("project_foreign_nationality_ng", False)),
+        talent_is_foreign_national=payload.get("talent_is_foreign_national"),
+        project_commerce_flow_limit=payload.get("project_commerce_flow_limit"),
+        talent_commerce_flow=payload.get("talent_commerce_flow"),
+        talent_affiliation=payload.get("talent_affiliation"),
+    )
+    return {
+        "talent_id": payload["talent_id"],
+        "project_id": payload["project_id"],
+        "score": result.score,
+        "score_band": result.score_band,
+        "score_breakdown": result.breakdown,
+    }

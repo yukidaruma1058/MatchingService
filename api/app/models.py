@@ -131,6 +131,7 @@ class Project(Base):
     project_code: Mapped[str | None] = mapped_column(String(32))
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     required_skills: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, server_default="[]")
+    preferred_skills: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, server_default="[]")
     rate_min: Mapped[int | None] = mapped_column(Integer)
     rate_max: Mapped[int | None] = mapped_column(Integer)
     location: Mapped[str | None] = mapped_column(String(128))
@@ -181,6 +182,19 @@ class Match(Base):
     ai_judged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     is_candidate: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DashboardHiddenMatch(Base):
+    """ダッシュボード高スコア一覧の表示状態（proposed / unproposed）。提案メールは消さない。"""
+
+    __tablename__ = "dashboard_hidden_matches"
+    __table_args__ = (UniqueConstraint("talent_id", "project_id"),)
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    talent_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    project_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    display_as: Mapped[str] = mapped_column(String(16), nullable=False, default="proposed", server_default="proposed")
+    hidden_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class CommuteCache(Base):

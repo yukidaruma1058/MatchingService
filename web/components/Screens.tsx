@@ -17,6 +17,7 @@ import {
   Topbar,
 } from "@/components/ui";
 import { settings } from "@/lib/mock-data";
+import { skillsMatch } from "@/lib/skillTerms";
 import {
   BatchRunError,
   buildGmailOAuthRedirectUri,
@@ -35,6 +36,7 @@ import {
   fetchContact,
   fetchContacts,
   fetchDashboard,
+  setDashboardHighScoreMatchProposed,
   fetchEmailDetail,
   fetchEmails,
   fetchGmailPipelineProgress,
@@ -89,10 +91,12 @@ import {
   type DashboardDailyPointDto,
   type DashboardDto,
   type DashboardFunnelDto,
+  type DashboardHighScoreMatchDto,
   type DashboardPeriodRange,
   type DashboardScoreBandOkDto,
   type EmailDetailDto,
   type EmailDto,
+  type MatchRunDto,
   type ProjectDto,
   type ProjectMatchItemDto,
   type ProjectProposeDraftDto,
@@ -110,6 +114,27 @@ function parseAddressList(raw: string): string[] {
     .split(/[,;\n]+/)
     .map((part) => part.trim())
     .filter((part) => part.length > 0);
+}
+
+async function runUnscoredMatchAndMaybeAiJudge(options: {
+  talentId?: string;
+  projectId?: string;
+}): Promise<{ result: MatchRunDto; judged: boolean }> {
+  const result = await runMatchScoreBatch({
+    force: false,
+    talentId: options.talentId,
+    projectId: options.projectId,
+  });
+  const matchCount = Number(result.stats?.match_count ?? result.stats?.scored_count ?? 0);
+  if (matchCount <= 0) {
+    return { result, judged: false };
+  }
+  const settingsData = await fetchSettings();
+  if (!settingsData.ai_assist_enabled) {
+    return { result, judged: false };
+  }
+  await runAiJudge(result.id, { projectId: options.projectId });
+  return { result, judged: true };
 }
 
 function formatByteSize(bytes: number | null | undefined): string {
@@ -520,7 +545,7 @@ function DashboardScreen() {
       }
       setMailIngestError({
         code: failedProgress.error_code ?? "ERR-0030",
-        message: failedProgress.error_message ?? "メール取込・ルール採点・返信同期の実行に失敗しました",
+        message: failedProgress.error_message ?? "メール取込パイプラインの実行に失敗しました",
       });
     },
   });
@@ -593,7 +618,7 @@ function DashboardScreen() {
       if (error instanceof BatchRunError) {
         setMailIngestError({ code: error.errorCode, message: error.errorMessage });
       } else {
-        setMailIngestError({ code: "ERR-0030", message: "メール取込・ルール採点・返信同期の開始に失敗しました" });
+        setMailIngestError({ code: "ERR-0030", message: "メール取込パイプラインの開始に失敗しました" });
       }
     }
   }
@@ -733,7 +758,8 @@ function DashboardScreen() {
     <>
       <Topbar
         title="ダッシュボード"
-        description="人材・案件・応募・取込の概況"
+        description="ラベルから取込・要約・返信同期・未採点ルール採点"
+
         actions={
           <>
             {canStopBatch ? (
@@ -774,6 +800,7 @@ function DashboardScreen() {
               type="button"
               disabled={busy}
               onClick={() => void handleMailIngest()}
+              title="ラベルから取込・要約・返信同期・未採点ルール採点"
             >
               {isRunningMailIngest ? "取込中..." : "メール取り込み"}
             </button>
@@ -951,6 +978,42 @@ function DashboardScreen() {
         }
       >
         <FunnelPanel funnel={dashboard?.funnel} />
+      </Panel>
+      <Panel
+        title={
+          <span className="th-with-help">
+            ルール点 {dashboard?.rule_score_min ?? 50} 以上の組み合わせ
+            <HelpTooltip label="高スコア組み合わせの説明">
+              <p>
+                <strong>説明</strong>
+                … 最新の完了したルール採点のうち、設定画面の最低点以上の人材×案件です。ファンネルの「提案可能」（score &gt; 0）とは別です。
+              </p>
+              <p>
+                <strong>対象</strong>
+                … active 人材 × open 案件。最大 100 件（点数の高い順）
+              </p>
+              <p>
+                <strong>表示</strong>
+                … 「未提案」を押すとグレーの「提案済み」になります。提案メール送信後も同様です。「提案済み」を押すと表示だけ「未提案」に戻し、提案メールは残します
+              </p>
+            </HelpTooltip>
+          </span>
+        }
+      >
+        <HighScoreMatchPanel
+          minScore={dashboard?.rule_score_min ?? 50}
+          total={dashboard?.high_score_match_count ?? 0}
+          rows={dashboard?.high_score_matches ?? []}
+          onToggleProposed={async (row, proposed) => {
+            await setDashboardHighScoreMatchProposed({
+              talentId: row.talent_id,
+              projectId: row.project_id,
+              proposed,
+            });
+            const dash = await fetchDashboard({ range: chartRange, end: chartEnd });
+            setDashboard(dash);
+          }}
+        />
       </Panel>
       <Panel
         title={
@@ -1510,6 +1573,93 @@ function FunnelPanel({ funnel }: { funnel: DashboardFunnelDto | undefined }) {
   );
 }
 
+function HighScoreMatchPanel({
+  minScore,
+  total,
+  rows,
+  onToggleProposed,
+}: {
+  minScore: number;
+  total: number;
+  rows: DashboardHighScoreMatchDto[];
+  onToggleProposed: (row: DashboardHighScoreMatchDto, proposed: boolean) => Promise<void>;
+}) {
+  const [updatingKey, setUpdatingKey] = useState<string | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const proposedCount = rows.filter((row) => row.proposed).length;
+
+  if (rows.length === 0) {
+    return (
+      <p className="muted">
+        {minScore} 点以上の組み合わせはまだありません。メール取込後のルール採点、または未採点ルール採点を実行してください。
+      </p>
+    );
+  }
+  return (
+    <>
+      {updateError ? <p className="notice">{updateError}</p> : null}
+      <p className="chart-period-summary muted">
+        {total} 件（{minScore} 点以上）
+        {proposedCount > 0 ? ` · 提案済み ${proposedCount} 件` : ""}
+        {total > rows.length ? ` · 上位 ${rows.length} 件を表示` : ""}
+      </p>
+      <div className="table-wrap">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>ルール点</th>
+              <th>人材</th>
+              <th>案件</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const key = `${row.talent_id}:${row.project_id}`;
+              const updating = updatingKey === key;
+              const proposed = Boolean(row.proposed);
+              return (
+                <tr key={row.match_id} className={proposed ? "is-inactive" : undefined}>
+                  <td>{row.score}</td>
+                  <td>
+                    <Link href={`/talents/${row.talent_id}`}>{row.talent_name}</Link>
+                  </td>
+                  <td>
+                    <Link href={`/projects/${row.project_id}`}>
+                      {row.project_title}
+                      {row.project_code ? `（${row.project_code}）` : ""}
+                    </Link>
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-compact"
+                      disabled={updatingKey != null}
+                      onClick={() => {
+                        setUpdateError(null);
+                        setUpdatingKey(key);
+                        void onToggleProposed(row, !proposed)
+                          .catch(() => {
+                            setUpdateError("表示の更新に失敗しました");
+                          })
+                          .finally(() => {
+                            setUpdatingKey(null);
+                          });
+                      }}
+                    >
+                      {updating ? "処理中..." : proposed ? "提案済み" : "未提案"}
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
 function ScoreBandOkBars({
   rows,
 }: {
@@ -1806,7 +1956,8 @@ function TalentDetailScreen({
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [matchesError, setMatchesError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const busy = busyAction !== null;
   const [message, setMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<TalentProposeDraftDto[] | null>(null);
@@ -1916,7 +2067,7 @@ function TalentDetailScreen({
       }
       return n;
     };
-    setBusy(true);
+    setBusyAction("save");
     setActionError(null);
     setMessage(null);
     try {
@@ -1951,7 +2102,7 @@ function TalentDetailScreen({
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "人材情報の保存に失敗しました");
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
@@ -1976,7 +2127,7 @@ function TalentDetailScreen({
       .then(setMatches)
       .catch(() => {
         setMatches([]);
-        setMatchesError("採点結果の取得に失敗しました。先にルール採点を実行してください。");
+        setMatchesError("採点結果の取得に失敗しました。この画面のルール採点から未採点分を実行してください。");
       });
     fetchSkillCatalog()
       .then((groups) => {
@@ -2013,7 +2164,7 @@ function TalentDetailScreen({
       setActionError("AI採点する案件を選択してください");
       return;
     }
-    setBusy(true);
+    setBusyAction("aiJudge");
     setActionError(null);
     setMessage(null);
     try {
@@ -2037,7 +2188,7 @@ function TalentDetailScreen({
         setActionError(err instanceof Error ? err.message : "AI採点に失敗しました");
       }
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
@@ -2046,7 +2197,7 @@ function TalentDetailScreen({
       setActionError("提案する案件を選択してください");
       return;
     }
-    setBusy(true);
+    setBusyAction("propose");
     setActionError(null);
     setMessage(null);
     try {
@@ -2114,7 +2265,7 @@ function TalentDetailScreen({
       setDraftCc("");
       setActionError(err instanceof Error ? err.message : "提案下書きの取得に失敗しました");
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
@@ -2142,7 +2293,7 @@ function TalentDetailScreen({
       return;
     }
     const matchIds = draft.match_ids?.length ? draft.match_ids : [draft.match_id];
-    setBusy(true);
+    setBusyAction("sendPropose");
     setActionError(null);
     setMessage(null);
     try {
@@ -2165,12 +2316,12 @@ function TalentDetailScreen({
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "案件提案の送信に失敗しました");
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
   const onSyncReplies = async () => {
-    setBusy(true);
+    setBusyAction("syncReplies");
     setActionError(null);
     setMessage(null);
     try {
@@ -2180,7 +2331,7 @@ function TalentDetailScreen({
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "返信同期に失敗しました");
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
@@ -2189,18 +2340,19 @@ function TalentDetailScreen({
       return;
     }
     const ok = window.confirm(
-      `人材「${talent.display_name}」と、公開中の全案件の組み合わせでルール採点します。\n既存のこの人材の採点は上書きされます。よろしいですか？`,
+      `人材「${talent.display_name}」と、未採点の公開中案件だけをルール採点します。\n既存の採点は上書きしません。よろしいですか？`,
     );
     if (!ok) {
       return;
     }
-    setBusy(true);
+    setBusyAction("matchScore");
     setActionError(null);
     setMessage(null);
     try {
-      const result = await runMatchScoreBatch({ force: true, talentId: talent.id });
+      const { result, judged } = await runUnscoredMatchAndMaybeAiJudge({ talentId: talent.id });
       setMessage(
-        `全案件とのルール採点が完了しました（${formatMatchRunStatusLabel(result.status)}）: 採点 ${String(result.stats?.scored_count ?? "-")} 件`,
+        `未採点の案件とのルール採点が完了しました（${formatMatchRunStatusLabel(result.status)}）: 採点 ${String(result.stats?.scored_count ?? "-")} 件` +
+          (judged ? "。続けて AI 判定を実行しました" : ""),
       );
       await reloadMatches();
     } catch (err) {
@@ -2210,7 +2362,7 @@ function TalentDetailScreen({
         setActionError(err instanceof Error ? err.message : "ルール採点に失敗しました");
       }
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
@@ -2224,14 +2376,14 @@ function TalentDetailScreen({
     if (!ok) {
       return;
     }
-    setBusy(true);
+    setBusyAction("delete");
     setActionError(null);
     try {
       await deleteTalent(talent.id);
       router.push("/talents");
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "人材の削除に失敗しました");
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
@@ -2251,19 +2403,19 @@ function TalentDetailScreen({
           <>
             <ButtonLink href="/talents">人材一覧</ButtonLink>
             <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void onRunMatchScoreForTalent()}>
-              {busy ? "処理中…" : "全案件とルール採点"}
+              {busyAction === "matchScore" ? "処理中…" : "未採点の案件とルール採点"}
             </button>
             <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void onSyncReplies()}>
-              {busy ? "処理中…" : "返信同期"}
+              {busyAction === "syncReplies" ? "処理中…" : "返信同期"}
             </button>
             <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void onAiJudgeSelected()}>
-              {busy ? "処理中…" : "選択をAI採点"}
+              {busyAction === "aiJudge" ? "処理中…" : "選択をAI採点"}
             </button>
             <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void onOpenProposePreview()}>
-              {busy ? "処理中…" : "案件を提案"}
+              {busyAction === "propose" ? "処理中…" : "案件を提案"}
             </button>
             <button type="button" className="btn btn-danger" disabled={busy} onClick={() => void onDeleteTalent()}>
-              {busy ? "処理中…" : "削除"}
+              {busyAction === "delete" ? "処理中…" : "削除"}
             </button>
           </>
         }
@@ -2320,7 +2472,7 @@ function TalentDetailScreen({
             ))}
             <div className="topbar-actions" style={{ marginTop: 16 }}>
               <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void onSendProposeDrafts()}>
-                {busy ? "送信中…" : "送信"}
+                {busyAction === "sendPropose" ? "送信中…" : "送信"}
               </button>
               <button type="button" className="btn btn-ghost" disabled={busy} onClick={onCancelProposePreview}>
                 キャンセル
@@ -2341,7 +2493,7 @@ function TalentDetailScreen({
               ) : (
                 <div className="topbar-actions">
                   <button type="button" className="btn btn-primary btn-compact" disabled={busy} onClick={() => void onSaveTalent()}>
-                    {busy ? "保存中…" : "保存"}
+                    {busyAction === "save" ? "保存中…" : "保存"}
                   </button>
                   <button type="button" className="btn btn-ghost btn-compact" disabled={busy} onClick={onCancelEdit}>
                     キャンセル
@@ -2446,7 +2598,7 @@ function TalentDetailScreen({
                   </select>
                 </Field>
                 <Field label="営業コメント／自己PR">
-                  <textarea rows={4} value={editSummary} onChange={(event) => setEditSummary(event.target.value)} />
+                  <textarea rows={16} value={editSummary} onChange={(event) => setEditSummary(event.target.value)} />
                 </Field>
                 <Field label="提案CC（カンマ区切り）">
                   <input
@@ -2498,7 +2650,16 @@ function TalentDetailScreen({
                   />
                   <Kv label="最寄駅" value={talent.nearest_station || "-"} />
                   <Kv label="状態" value={formatTalentStatusLabel(talent.status)} />
-                  <Kv label="営業コメント／自己PR" value={talent.summary || "-"} />
+                  <Kv
+                    label="営業コメント／自己PR"
+                    value={
+                      talent.summary ? (
+                        <span style={{ whiteSpace: "pre-wrap" }}>{talent.summary}</span>
+                      ) : (
+                        "-"
+                      )
+                    }
+                  />
                   <Kv
                     label="提案CC"
                     value={
@@ -2575,7 +2736,7 @@ function TalentDetailScreen({
         </p>
         {matchesError ? <p className="muted">{matchesError}</p> : null}
         {!matchesError && matches.length === 0 ? (
-          <p className="muted">まだ採点結果がありません。案件一覧からルール採点を実行してください。</p>
+          <p className="muted">まだ採点結果がありません。この画面の「未採点の案件とルール採点」から実行してください。</p>
         ) : null}
         {!matchesError && matches.length > 0 && filteredMatches.length === 0 ? (
           <p className="muted">条件に一致する案件がありません。検索条件を変えるかクリアしてください。</p>
@@ -2750,28 +2911,6 @@ function ProjectsScreen({ searchParams }: { searchParams: SearchParams }) {
       .catch(() => undefined);
   }, []);
 
-  const onRunMatchScore = async () => {
-    setBusy(true);
-    setActionError(null);
-    setMessage(null);
-    try {
-      const result = await runMatchScoreBatch({ force: false });
-      setMessage(
-        `採点完了（${formatMatchRunStatusLabel(result.status)}）: 組合せ ${String(result.stats?.match_count ?? "-")} 件`,
-      );
-      const list = await fetchProjects();
-      setProjects(list);
-    } catch (err) {
-      if (err instanceof BatchRunError) {
-        setActionError(`${err.errorCode}: ${err.errorMessage}`);
-      } else {
-        setActionError(err instanceof Error ? err.message : "ルール採点に失敗しました");
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const onSyncReplies = async () => {
     setBusy(true);
     setActionError(null);
@@ -2832,9 +2971,6 @@ function ProjectsScreen({ searchParams }: { searchParams: SearchParams }) {
             >
               {busy ? "処理中…" : "返信同期"}
             </button>
-            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void onRunMatchScore()}>
-              {busy ? "処理中…" : "ルール採点を実行"}
-            </button>
           </>
         }
       />
@@ -2891,7 +3027,8 @@ function ProjectDetailScreen({
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [matchesError, setMatchesError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const busy = busyAction !== null;
   const [message, setMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [draft, setDraft] = useState<ProjectProposeDraftDto | null>(null);
@@ -2905,6 +3042,7 @@ function ProjectDetailScreen({
   const [editTitle, setEditTitle] = useState("");
   const [editProjectCode, setEditProjectCode] = useState("");
   const [editSkills, setEditSkills] = useState("");
+  const [editPreferredSkills, setEditPreferredSkills] = useState("");
   const [editRateMin, setEditRateMin] = useState("");
   const [editRateMax, setEditRateMax] = useState("");
   const [editLocation, setEditLocation] = useState("");
@@ -2988,6 +3126,7 @@ function ProjectDetailScreen({
     setEditTitle(row.title || "");
     setEditProjectCode(row.project_code || "");
     setEditSkills((row.required_skills || []).join("\n"));
+    setEditPreferredSkills((row.preferred_skills || []).join("\n"));
     setEditRateMin(rateToEditValue(row.rate_min));
     setEditRateMax(rateToEditValue(row.rate_max));
     setEditLocation(row.location || "");
@@ -3040,7 +3179,7 @@ function ProjectDetailScreen({
       }
       return n;
     };
-    setBusy(true);
+    setBusyAction("save");
     setActionError(null);
     setMessage(null);
     try {
@@ -3055,6 +3194,10 @@ function ProjectDetailScreen({
         title,
         project_code: editProjectCode.trim() || null,
         required_skills: editSkills
+          .split(/[\n,、]+/)
+          .map((part) => part.trim())
+          .filter(Boolean),
+        preferred_skills: editPreferredSkills
           .split(/[\n,、]+/)
           .map((part) => part.trim())
           .filter(Boolean),
@@ -3080,7 +3223,7 @@ function ProjectDetailScreen({
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "案件情報の保存に失敗しました");
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
@@ -3110,7 +3253,7 @@ function ProjectDetailScreen({
       .then(setMatches)
       .catch(() => {
         setMatches([]);
-        setMatchesError("採点結果の取得に失敗しました。API を再起動するか、先にルール採点を実行してください。");
+        setMatchesError("採点結果の取得に失敗しました。API を再起動するか、この画面のルール採点から未採点分を実行してください。");
       });
     fetchSkillCatalog()
       .then((groups) => {
@@ -3147,7 +3290,7 @@ function ProjectDetailScreen({
       setActionError("AI採点する人材を選択してください");
       return;
     }
-    setBusy(true);
+    setBusyAction("aiJudge");
     setActionError(null);
     setMessage(null);
     try {
@@ -3171,7 +3314,7 @@ function ProjectDetailScreen({
         setActionError(err instanceof Error ? err.message : "AI採点に失敗しました");
       }
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
@@ -3180,7 +3323,7 @@ function ProjectDetailScreen({
       setActionError("提案する人材を選択してください");
       return;
     }
-    setBusy(true);
+    setBusyAction("propose");
     setActionError(null);
     setMessage(null);
     setTalentDrafts(null);
@@ -3210,7 +3353,7 @@ function ProjectDetailScreen({
       setDraftCc("");
       setActionError(err instanceof Error ? err.message : "提案下書きの取得に失敗しました");
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
@@ -3226,7 +3369,7 @@ function ProjectDetailScreen({
       setActionError("案件紹介する人材を選択してください");
       return;
     }
-    setBusy(true);
+    setBusyAction("introduce");
     setActionError(null);
     setMessage(null);
     setDraft(null);
@@ -3272,7 +3415,7 @@ function ProjectDetailScreen({
       setTalentDraftCcTexts([]);
       setActionError(err instanceof Error ? err.message : "案件紹介下書きの取得に失敗しました");
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
@@ -3317,7 +3460,7 @@ function ProjectDetailScreen({
     const allMatchIds = talentDrafts.flatMap((row) =>
       row.match_ids?.length ? row.match_ids : [row.match_id],
     );
-    setBusy(true);
+    setBusyAction("sendIntroduce");
     setActionError(null);
     setMessage(null);
     try {
@@ -3339,7 +3482,7 @@ function ProjectDetailScreen({
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "案件紹介メールの送信に失敗しました");
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
@@ -3358,7 +3501,7 @@ function ProjectDetailScreen({
       setActionError("宛先を入力してください");
       return;
     }
-    setBusy(true);
+    setBusyAction("sendPropose");
     setActionError(null);
     setMessage(null);
     try {
@@ -3376,12 +3519,43 @@ function ProjectDetailScreen({
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "案件配信元への提案送信に失敗しました");
     } finally {
-      setBusy(false);
+      setBusyAction(null);
+    }
+  };
+
+  const onRunMatchScoreForProject = async () => {
+    if (!project) {
+      return;
+    }
+    const ok = window.confirm(
+      `案件「${project.title}」と、未採点の公開中人材だけをルール採点します。\n既存の採点は上書きしません。よろしいですか？`,
+    );
+    if (!ok) {
+      return;
+    }
+    setBusyAction("matchScore");
+    setActionError(null);
+    setMessage(null);
+    try {
+      const { result, judged } = await runUnscoredMatchAndMaybeAiJudge({ projectId: project.id });
+      setMessage(
+        `未採点の人材とのルール採点が完了しました（${formatMatchRunStatusLabel(result.status)}）: 採点 ${String(result.stats?.scored_count ?? "-")} 件` +
+          (judged ? "。続けて AI 判定を実行しました" : ""),
+      );
+      await reloadMatches();
+    } catch (err) {
+      if (err instanceof BatchRunError) {
+        setActionError(`${err.errorCode}: ${err.errorMessage}`);
+      } else {
+        setActionError(err instanceof Error ? err.message : "ルール採点に失敗しました");
+      }
+    } finally {
+      setBusyAction(null);
     }
   };
 
   const onSyncReplies = async () => {
-    setBusy(true);
+    setBusyAction("syncReplies");
     setActionError(null);
     setMessage(null);
     try {
@@ -3391,7 +3565,7 @@ function ProjectDetailScreen({
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "返信同期に失敗しました");
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
@@ -3405,14 +3579,14 @@ function ProjectDetailScreen({
     if (!ok) {
       return;
     }
-    setBusy(true);
+    setBusyAction("delete");
     setActionError(null);
     try {
       await deleteProject(project.id);
       router.push("/projects");
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "案件の削除に失敗しました");
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
@@ -3433,14 +3607,17 @@ function ProjectDetailScreen({
         actions={
           <>
             <ButtonLink href="/projects">案件一覧</ButtonLink>
+            <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void onRunMatchScoreForProject()}>
+              {busyAction === "matchScore" ? "処理中…" : "未採点の人材とルール採点"}
+            </button>
             <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void onSyncReplies()}>
-              {busy ? "処理中…" : "返信同期"}
+              {busyAction === "syncReplies" ? "処理中…" : "返信同期"}
             </button>
             <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void onAiJudgeSelected()}>
-              {busy ? "処理中…" : "選択をAI採点"}
+              {busyAction === "aiJudge" ? "処理中…" : "選択をAI採点"}
             </button>
             <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void onOpenProposePreview()}>
-              {busy ? "処理中…" : "人材を提案"}
+              {busyAction === "propose" ? "処理中…" : "人材を提案"}
             </button>
             <button
               type="button"
@@ -3448,10 +3625,10 @@ function ProjectDetailScreen({
               disabled={busy}
               onClick={() => void onOpenTalentIntroducePreview()}
             >
-              {busy ? "処理中…" : "人材へ案件紹介"}
+              {busyAction === "introduce" ? "処理中…" : "人材へ案件紹介"}
             </button>
             <button type="button" className="btn btn-danger" disabled={busy} onClick={() => void onDeleteProject()}>
-              {busy ? "処理中…" : "削除"}
+              {busyAction === "delete" ? "処理中…" : "削除"}
             </button>
           </>
         }
@@ -3542,7 +3719,7 @@ function ProjectDetailScreen({
             </article>
             <div className="topbar-actions" style={{ marginTop: 16 }}>
               <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void onSendProposeDraft()}>
-                {busy ? "送信中…" : "送信"}
+                {busyAction === "sendPropose" ? "送信中…" : "送信"}
               </button>
               <button type="button" className="btn btn-ghost" disabled={busy} onClick={onCancelProposePreview}>
                 キャンセル
@@ -3609,7 +3786,7 @@ function ProjectDetailScreen({
                 disabled={busy}
                 onClick={() => void onSendTalentIntroduceDrafts()}
               >
-                {busy ? "送信中…" : "送信"}
+                {busyAction === "sendIntroduce" ? "送信中…" : "送信"}
               </button>
               <button
                 type="button"
@@ -3635,7 +3812,7 @@ function ProjectDetailScreen({
               ) : (
                 <div className="topbar-actions">
                   <button type="button" className="btn btn-primary btn-compact" disabled={busy} onClick={() => void onSaveProject()}>
-                    {busy ? "保存中…" : "保存"}
+                    {busyAction === "save" ? "保存中…" : "保存"}
                   </button>
                   <button type="button" className="btn btn-ghost btn-compact" disabled={busy} onClick={onCancelEdit}>
                     キャンセル
@@ -3659,6 +3836,13 @@ function ProjectDetailScreen({
                 </Field>
                 <Field label="必須スキル（改行またはカンマ区切り）">
                   <textarea rows={4} value={editSkills} onChange={(event) => setEditSkills(event.target.value)} />
+                </Field>
+                <Field label="尚可スキル（改行またはカンマ区切り）">
+                  <textarea
+                    rows={3}
+                    value={editPreferredSkills}
+                    onChange={(event) => setEditPreferredSkills(event.target.value)}
+                  />
                 </Field>
                 <Field label="単価下限（万円）">
                   <input
@@ -3764,6 +3948,7 @@ function ProjectDetailScreen({
             ) : (
               <dl className="kv-list">
                 <Kv label="必須スキル" value={formatSkills(project.required_skills)} />
+                <Kv label="尚可スキル" value={formatSkills(project.preferred_skills)} />
                 <Kv
                   label="配信元会社"
                   value={
@@ -3852,7 +4037,7 @@ function ProjectDetailScreen({
         </p>
         {matchesError ? <p className="notice">{matchesError}</p> : null}
         {!matchesError && matches.length === 0 ? (
-          <p className="muted">まだ採点結果がありません。案件一覧からルール採点を実行してください。</p>
+          <p className="muted">まだ採点結果がありません。この画面の「未採点の人材とルール採点」から実行してください。</p>
         ) : null}
         {!matchesError && matches.length > 0 && filteredMatches.length === 0 ? (
           <p className="muted">条件に一致する要員がありません。検索条件を変えるかクリアしてください。</p>
@@ -4002,7 +4187,11 @@ function ProjectDetailScreen({
                       )}
                     </td>
                     <td>
-                      <MatchedSkillsCell skills={row.skills} requiredSkills={project.required_skills} />
+                      <MatchedSkillsCell
+                        skills={row.skills}
+                        requiredSkills={project.required_skills}
+                        preferredSkills={project.preferred_skills}
+                      />
                     </td>
                     <td>{formatRate(row.desired_rate)}</td>
                     <td className="col-proposal-result">
@@ -4287,6 +4476,7 @@ function CompanyDetailScreen({ companyId }: { companyId: string }) {
 
 function TalentFormScreen() {
   const [title, setTitle] = useState("");
+  const [fromAddress, setFromAddress] = useState("");
   const [bodyText, setBodyText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -4295,6 +4485,7 @@ function TalentFormScreen() {
     event.preventDefault();
     const subject = title.trim();
     const body = bodyText.trim();
+    const email = fromAddress.trim();
     if (!subject) {
       setError("タイトルを入力してください");
       return;
@@ -4303,10 +4494,18 @@ function TalentFormScreen() {
       setError("本文を入力してください");
       return;
     }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setError("メールアドレスの形式が正しくありません");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      const saved = await createTalent({ title: subject, body });
+      const saved = await createTalent({
+        title: subject,
+        body,
+        ...(email ? { from_address: email } : {}),
+      });
       window.location.href = `/talents/${saved.id}`;
     } catch (err) {
       setError(err instanceof Error ? err.message : "人材の登録に失敗しました");
@@ -4326,6 +4525,7 @@ function TalentFormScreen() {
       <Panel title="登録内容">
         <p className="muted field-help-block">
           メールの件名と本文を貼り付けてください。スキル・単価などは AI が抽出します（登録後に詳細画面で修正できます）。
+          メールアドレスは紹介元への提案時の宛先に使います。
         </p>
         <form className="form-grid" onSubmit={(event) => void onSubmit(event)} noValidate>
           <Field label="タイトル" required grow>
@@ -4339,6 +4539,21 @@ function TalentFormScreen() {
               }}
               placeholder="メール件名や要員名など"
               disabled={busy}
+            />
+          </Field>
+          <Field label="メールアドレス" grow>
+            <input
+              type="email"
+              value={fromAddress}
+              onChange={(event) => {
+                setFromAddress(event.target.value);
+                if (error) {
+                  setError(null);
+                }
+              }}
+              placeholder="紹介元の From / 返信先（例: tanaka@example.com）"
+              disabled={busy}
+              autoComplete="email"
             />
           </Field>
           <Field label="本文" required grow>
@@ -4369,6 +4584,7 @@ function TalentFormScreen() {
 
 function ProjectFormScreen() {
   const [title, setTitle] = useState("");
+  const [fromAddress, setFromAddress] = useState("");
   const [bodyText, setBodyText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -4377,6 +4593,7 @@ function ProjectFormScreen() {
     event.preventDefault();
     const subject = title.trim();
     const body = bodyText.trim();
+    const email = fromAddress.trim();
     if (!subject) {
       setError("タイトルを入力してください");
       return;
@@ -4385,10 +4602,18 @@ function ProjectFormScreen() {
       setError("本文を入力してください");
       return;
     }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setError("メールアドレスの形式が正しくありません");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      const saved = await createProject({ title: subject, body });
+      const saved = await createProject({
+        title: subject,
+        body,
+        ...(email ? { from_address: email } : {}),
+      });
       window.location.href = `/projects/${saved.id}`;
     } catch (err) {
       setError(err instanceof Error ? err.message : "案件の登録に失敗しました");
@@ -4408,6 +4633,7 @@ function ProjectFormScreen() {
       <Panel title="登録内容">
         <p className="muted field-help-block">
           メールの件名と本文を貼り付けてください。スキル・単価などは AI が抽出します（登録後に詳細画面で修正できます）。
+          メールアドレスは配信元への提案時の宛先に使います。
         </p>
         <form className="form-grid" onSubmit={(event) => void onSubmit(event)} noValidate>
           <Field label="タイトル" required grow>
@@ -4421,6 +4647,21 @@ function ProjectFormScreen() {
               }}
               placeholder="メール件名や案件名など"
               disabled={busy}
+            />
+          </Field>
+          <Field label="メールアドレス" grow>
+            <input
+              type="email"
+              value={fromAddress}
+              onChange={(event) => {
+                setFromAddress(event.target.value);
+                if (error) {
+                  setError(null);
+                }
+              }}
+              placeholder="配信元の From / 返信先（例: sales@example.com）"
+              disabled={busy}
+              autoComplete="email"
             />
           </Field>
           <Field label="本文" required grow>
@@ -4798,13 +5039,13 @@ function EmailsScreen() {
     startMailIngest,
   } = useMailIngestProgress({
     onCompleted: async () => {
-      setNotice("取込・ルール採点・返信同期が完了しました");
+      setNotice("取込・返信同期が完了しました");
       await reload();
     },
     onFailed: (failedProgress) => {
       setError({
         code: failedProgress.error_code ?? "ERR-0030",
-        message: failedProgress.error_message ?? "メール取込・ルール採点・返信同期の実行に失敗しました",
+        message: failedProgress.error_message ?? "メール取込パイプラインの実行に失敗しました",
       });
     },
   });
@@ -4868,7 +5109,7 @@ function EmailsScreen() {
       if (err instanceof BatchRunError) {
         setError({ code: err.errorCode, message: err.errorMessage });
       } else {
-        setError({ code: "ERR-0030", message: "メール取込・ルール採点・返信同期の開始に失敗しました" });
+        setError({ code: "ERR-0030", message: "メール取込パイプラインの開始に失敗しました" });
       }
     }
   }
@@ -4924,7 +5165,7 @@ function EmailsScreen() {
     <>
       <Topbar
         title="メール取込"
-        description="設定した Gmail ラベルから人材 / 案件を取り込み、ルール採点・返信同期を実行します"
+        description="設定した Gmail ラベルから人材 / 案件を取り込み、要約・返信同期・未採点ルール採点を実行します。"
         actions={<ButtonLink href="/settings">設定へ</ButtonLink>}
       />
       {error ? <p className="notice">{error.code}: {error.message}</p> : null}
@@ -5010,6 +5251,7 @@ function EmailsScreen() {
 function SettingsScreen({ searchParams }: { searchParams: SearchParams }) {
   const [aiAssistEnabled, setAiAssistEnabled] = useState(false);
   const [aiJudgementTopN, setAiJudgementTopN] = useState(5);
+  const [dashboardRuleScoreMin, setDashboardRuleScoreMin] = useState(50);
   const [ownCompanyName, setOwnCompanyName] = useState("");
   const [applyFromAddress, setApplyFromAddress] = useState("");
   const [replyKeywordsOk, setReplyKeywordsOk] = useState("よろしくお願いします\n前向き\n候補として\nご提案ください");
@@ -5045,6 +5287,9 @@ function SettingsScreen({ searchParams }: { searchParams: SearchParams }) {
     setGmailIngestProjectLabel(data.gmail_sort_label_project ?? settings.ingestProjectLabel);
     setAiAssistEnabled(Boolean(data.ai_assist_enabled));
     setAiJudgementTopN(typeof data.ai_judgement_top_n === "number" ? data.ai_judgement_top_n : 5);
+    setDashboardRuleScoreMin(
+      typeof data.dashboard_rule_score_min === "number" ? data.dashboard_rule_score_min : 50,
+    );
     setOwnCompanyName(data.own_company_name ?? "");
     setApplyFromAddress(data.apply_from_address ?? "");
     setReplyKeywordsOk(data.reply_keywords_ok ?? "よろしくお願いします\n前向き\n候補として\nご提案ください");
@@ -5114,6 +5359,9 @@ function SettingsScreen({ searchParams }: { searchParams: SearchParams }) {
         gmail_sort_label_project: gmailIngestProjectLabel,
         ai_assist_enabled: aiAssistEnabled,
         ai_judgement_top_n: aiJudgementTopN,
+        dashboard_rule_score_min: Number.isFinite(dashboardRuleScoreMin)
+          ? Math.max(0, Math.min(100, Math.round(dashboardRuleScoreMin)))
+          : 50,
         own_company_name: ownCompanyName,
         apply_from_address: applyFromAddress,
         reply_keywords_ok: replyKeywordsOk,
@@ -5190,10 +5438,27 @@ function SettingsScreen({ searchParams }: { searchParams: SearchParams }) {
               人材提案メールの商流表示と、ルール採点の商流制限判定に使います。配信会社が自社名と一致すれば「プロパー」、それ以外は商流を1社先にして所属（例: 正社員 → 一社先正社員）を付与します。人材詳細のプロフィール表示は変わりません。
             </p>
           </div>
+          <div className="field">
+            <label htmlFor="dashboard-rule-score-min">ダッシュボード表示（ルール点）</label>
+            <div className="score-input-row">
+              <input
+                id="dashboard-rule-score-min"
+                type="number"
+                min={0}
+                max={100}
+                value={dashboardRuleScoreMin}
+                onChange={(event) => setDashboardRuleScoreMin(Number(event.target.value))}
+              />
+              <span className="score-input-suffix">点以上</span>
+            </div>
+            <p className="muted field-help-block">
+              メール取込後のルール採点結果のうち、この点数以上の人材×案件をダッシュボードに一覧します。ファンネルの「提案可能」は従来どおり score &gt; 0 です。
+            </p>
+          </div>
           <div className="toggle-row">
             <div className="toggle-copy">
               <strong>ルール上位候補にAI判定を行う</strong>
-              <span>ON の場合は取込パイプラインのルール採点完了後に自動実行。OFF の場合は詳細画面から手動実行します。</span>
+              <span>ON の場合は詳細画面のルール採点完了後に自動実行。OFF の場合は詳細画面から選択して手動実行します。</span>
             </div>
             <label className="switch" title="AI補助判定">
               <input
@@ -5458,7 +5723,7 @@ function SettingsScreen({ searchParams }: { searchParams: SearchParams }) {
           <div className="settings-subsection">
             <h3>メール取込（BAT-002）</h3>
             <p className="muted field-help-block">
-              Gmail フィルタで付与したラベル名を指定してください。取込時はこれらのラベル付きメールを DB に登録し、処理後は「ラベル名（処理済み）」へ移動します。「ラベル名返信」は提案送信時に自動作成されます。
+              Gmail フィルタで付与したラベル名を指定してください。取込時はこれらのラベル付きメールを DB に登録します（Gmail 側のラベルは変更しません）。既に取込済みのメールは DB でスキップします。「ラベル名返信」は提案送信時に自動作成されます。
             </p>
             <div className="settings-field-grid">
               <Field label="人材取込ラベル">
@@ -6093,6 +6358,17 @@ type TalentSortKey =
   | "status"
   | "email_received_at";
 
+type ProjectSortKey =
+  | "id"
+  | "title"
+  | "distributor_company_name"
+  | "location"
+  | "required_skills"
+  | "rate"
+  | "proposed"
+  | "status"
+  | "email_received_at";
+
 type SortDir = "asc" | "desc";
 
 type ProjectMatchSortKey =
@@ -6466,6 +6742,57 @@ function SimpleTalentTable({
   );
 }
 
+function projectIdLabel(project: ProjectDto): string {
+  return project.project_code || project.id.slice(0, 8);
+}
+
+function compareProjects(a: ProjectDto, b: ProjectDto, key: ProjectSortKey): number {
+  switch (key) {
+    case "id":
+      return compareNullableString(projectIdLabel(a), projectIdLabel(b));
+    case "title":
+      return compareNullableString(a.title, b.title);
+    case "distributor_company_name":
+      return compareNullableString(a.distributor_company_name, b.distributor_company_name);
+    case "location":
+      return compareNullableString(a.location, b.location);
+    case "required_skills":
+      return (a.required_skills ?? [])
+        .join("\u0001")
+        .localeCompare((b.required_skills ?? []).join("\u0001"), "ja");
+    case "rate": {
+      const byMin = compareNullableNumber(a.rate_min, b.rate_min);
+      if (byMin !== 0) {
+        return byMin;
+      }
+      return compareNullableNumber(a.rate_max, b.rate_max);
+    }
+    case "proposed":
+      return (a.proposed_talent_count ?? 0) - (b.proposed_talent_count ?? 0);
+    case "status":
+      return compareNullableString(a.status, b.status);
+    case "email_received_at":
+      return compareNullableString(a.email_received_at, b.email_received_at);
+    default:
+      return 0;
+  }
+}
+
+function TruncatedSkillsCell({ skills, maxChars = 20 }: { skills: string[] | undefined; maxChars?: number }) {
+  const full = formatSkills(skills);
+  if (!skills || skills.length === 0 || full === "-") {
+    return <span className="muted">-</span>;
+  }
+  if (full.length <= maxChars) {
+    return <span>{full}</span>;
+  }
+  return (
+    <span title={full} className="skills-truncated">
+      {full.slice(0, maxChars)}…
+    </span>
+  );
+}
+
 function SimpleProjectTable({
   compact,
   rows = [],
@@ -6475,32 +6802,78 @@ function SimpleProjectTable({
   rows?: ProjectDto[];
   onDelete?: (project: ProjectDto) => void;
 }) {
+  const [sortKey, setSortKey] = useState<ProjectSortKey | null>(null);
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+
+  const onSort = (key: ProjectSortKey) => {
+    if (sortKey === key) {
+      setSortDir((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(key);
+    setSortDir("asc");
+  };
+
+  const sortedRows = useMemo(() => {
+    if (!sortKey) {
+      return rows;
+    }
+    const factor = sortDir === "asc" ? 1 : -1;
+    return [...rows].sort((a, b) => factor * compareProjects(a, b, sortKey));
+  }, [rows, sortKey, sortDir]);
+
   return (
     <div className="table-wrap">
       <table className="table">
         <thead>
           <tr>
-            <th>ID</th>
-            <th>案件名</th>
-            {!compact ? <th>配信元</th> : null}
-            {!compact ? <th>勤務地</th> : null}
-            <th>必須スキル</th>
-            <th>単価</th>
-            {!compact ? <th>提案状況</th> : null}
-            <th>状態</th>
-            {!compact ? <th>受信日</th> : null}
+            <SortableTh label="ID" sortKey="id" activeKey={sortKey} dir={sortDir} onSort={onSort} />
+            <SortableTh label="案件名" sortKey="title" activeKey={sortKey} dir={sortDir} onSort={onSort} />
+            {!compact ? (
+              <SortableTh
+                label="配信元"
+                sortKey="distributor_company_name"
+                activeKey={sortKey}
+                dir={sortDir}
+                onSort={onSort}
+              />
+            ) : null}
+            {!compact ? (
+              <SortableTh label="勤務地" sortKey="location" activeKey={sortKey} dir={sortDir} onSort={onSort} />
+            ) : null}
+            <SortableTh
+              label="必須スキル"
+              sortKey="required_skills"
+              activeKey={sortKey}
+              dir={sortDir}
+              onSort={onSort}
+            />
+            <SortableTh label="単価" sortKey="rate" activeKey={sortKey} dir={sortDir} onSort={onSort} />
+            {!compact ? (
+              <SortableTh label="提案状況" sortKey="proposed" activeKey={sortKey} dir={sortDir} onSort={onSort} />
+            ) : null}
+            <SortableTh label="状態" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={onSort} />
+            {!compact ? (
+              <SortableTh
+                label="受信日"
+                sortKey="email_received_at"
+                activeKey={sortKey}
+                dir={sortDir}
+                onSort={onSort}
+              />
+            ) : null}
             <th />
           </tr>
         </thead>
         <tbody>
-          {rows.map((project) => {
+          {sortedRows.map((project) => {
             const proposedCount = project.proposed_talent_count ?? 0;
             const noReplyCount = project.proposed_no_reply_count ?? 0;
             const okCount = project.proposed_ok_count ?? 0;
             const ngCount = project.proposed_ng_count ?? 0;
             return (
               <tr key={project.id}>
-                <td>{project.project_code || project.id.slice(0, 8)}</td>
+                <td>{projectIdLabel(project)}</td>
                 <td>
                   <Link href={`/projects/${project.id}`}>{project.title}</Link>
                 </td>
@@ -6516,7 +6889,9 @@ function SimpleProjectTable({
                   </td>
                 ) : null}
                 {!compact ? <td>{project.location || "-"}</td> : null}
-                <td>{formatSkills(project.required_skills)}</td>
+                <td>
+                  <TruncatedSkillsCell skills={project.required_skills} maxChars={20} />
+                </td>
                 <td>
                   {project.rate_min != null || project.rate_max != null
                     ? formatRateRange(project.rate_min, project.rate_max)
@@ -6560,7 +6935,7 @@ function SimpleProjectTable({
               </tr>
             );
           })}
-          {rows.length === 0 ? (
+          {sortedRows.length === 0 ? (
             <tr>
               <td colSpan={compact ? 6 : 10}>
                 <span className="muted">案件データはまだありません。</span>
@@ -6935,39 +7310,22 @@ function ReplyBodyModal({
   );
 }
 
-/** 採点ロジックに近い簡易正規化（表示用マッチ判定）。 */
-function normalizeSkillLabel(raw: string): string {
-  return raw
-    .normalize("NFKC")
-    .trim()
-    .toLowerCase()
-    .replace(/[\s　_\-]+/g, " ")
-    .replace(/．/g, ".")
-    .trim();
-}
-
 function isSkillMatchedToRequired(talentSkill: string, requiredSkills: string[]): boolean {
-  const talent = normalizeSkillLabel(talentSkill);
-  if (!talent) {
+  if (!talentSkill.trim() || requiredSkills.length === 0) {
     return false;
   }
-  return requiredSkills.some((required) => {
-    const req = normalizeSkillLabel(required);
-    if (!req) {
-      return false;
-    }
-    return talent === req || talent.includes(req) || req.includes(talent);
-  });
+  return requiredSkills.some((required) => skillsMatch(talentSkill, required));
 }
 
 function splitSkillsByProjectMatch(
   skills: string[],
   requiredSkills: string[] | undefined,
+  preferredSkills: string[] | undefined = [],
 ): { matched: string[]; others: string[] } {
   if (!skills.length) {
     return { matched: [], others: [] };
   }
-  const required = requiredSkills ?? [];
+  const required = [...(requiredSkills ?? []), ...(preferredSkills ?? [])];
   if (required.length === 0) {
     return { matched: [], others: skills };
   }
@@ -7176,11 +7534,13 @@ function SkillTags({ skills }: { skills: string[] }) {
 function MatchedSkillsCell({
   skills,
   requiredSkills,
+  preferredSkills,
 }: {
   skills: string[];
   requiredSkills?: string[];
+  preferredSkills?: string[];
 }) {
-  const { matched, others } = splitSkillsByProjectMatch(skills, requiredSkills);
+  const { matched, others } = splitSkillsByProjectMatch(skills, requiredSkills, preferredSkills);
   const [panelStyle, setPanelStyle] = useState<CSSProperties | null>(null);
   const anchorRef = useRef<HTMLSpanElement | null>(null);
 

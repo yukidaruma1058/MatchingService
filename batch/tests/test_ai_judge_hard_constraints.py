@@ -8,7 +8,7 @@ from app.constraint_rules import evaluate_match_hard_constraints, hard_reject_la
 
 
 class EvaluateMatchHardConstraintsTests(unittest.TestCase):
-    def test_commerce_reject_for_ai_path(self) -> None:
+    def test_commerce_flow_does_not_reject_for_ai_path(self) -> None:
         code, adjusted = evaluate_match_hard_constraints(
             own_company_name="株式会社Kanana",
             talent_company_name="A社",
@@ -19,8 +19,7 @@ class EvaluateMatchHardConstraintsTests(unittest.TestCase):
             project_commerce_flow_limit="貴社まで",
         )
         self.assertEqual(adjusted, "一社先正社員")
-        self.assertEqual(code, "commerce_flow")
-        self.assertIn("商流", hard_reject_label(code) or "")
+        self.assertIsNone(code)
 
     def test_foreign_nationality_reject_for_ai_path(self) -> None:
         code, adjusted = evaluate_match_hard_constraints(

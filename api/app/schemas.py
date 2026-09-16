@@ -15,6 +15,7 @@ class SettingsResponse(BaseModel):
     gmail_sort_label_project: str = "SES案件配信"
     ai_assist_enabled: bool = False
     ai_judgement_top_n: int = Field(5, ge=1, le=20)
+    dashboard_rule_score_min: int = Field(50, ge=0, le=100)
     own_company_name: str = ""
     apply_from_address: str = ""
     reply_keywords_ok: str = "よろしくお願いします\n前向き\n候補として\nご提案ください"
@@ -43,6 +44,7 @@ class SettingsUpdateRequest(BaseModel):
     gmail_sort_label_project: str | None = None
     ai_assist_enabled: bool | None = None
     ai_judgement_top_n: int | None = Field(None, ge=1, le=20)
+    dashboard_rule_score_min: int | None = Field(None, ge=0, le=100)
     own_company_name: str | None = None
     apply_from_address: str | None = None
     reply_keywords_ok: str | None = None
@@ -211,6 +213,7 @@ class ProjectListItem(BaseModel):
     title: str
     project_code: str | None = None
     required_skills: list[str]
+    preferred_skills: list[str] = []
     rate_min: int | None = None
     rate_max: int | None = None
     location: str | None = None
@@ -288,6 +291,41 @@ class DashboardScoreBandOk(BaseModel):
     ok_rate: float = 0.0
 
 
+class DashboardHighScoreMatch(BaseModel):
+    match_id: str
+    talent_id: str
+    talent_name: str
+    project_id: str
+    project_title: str
+    project_code: str | None = None
+    score: int
+    score_band: str | None = None
+    proposed: bool = False
+
+
+class HideHighScoreMatchRequest(BaseModel):
+    talent_id: str
+    project_id: str
+
+
+class HideHighScoreMatchResponse(BaseModel):
+    hidden: bool = True
+    talent_id: str
+    project_id: str
+
+
+class SetHighScoreMatchDisplayRequest(BaseModel):
+    talent_id: str
+    project_id: str
+    proposed: bool
+
+
+class SetHighScoreMatchDisplayResponse(BaseModel):
+    proposed: bool
+    talent_id: str
+    project_id: str
+
+
 class DashboardResponse(BaseModel):
     talent_count: int
     project_count: int
@@ -325,3 +363,6 @@ class DashboardResponse(BaseModel):
     by_company: list[DashboardCompanyIngest] = []
     funnel: DashboardFunnel = DashboardFunnel()
     ok_by_score_band: list[DashboardScoreBandOk] = []
+    rule_score_min: int = 50
+    high_score_match_count: int = 0
+    high_score_matches: list[DashboardHighScoreMatch] = []

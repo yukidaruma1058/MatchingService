@@ -63,7 +63,7 @@ class ProposalCommerceFlowTests(unittest.TestCase):
             "一社先",
         )
 
-    def test_other_company_rejects_when_project_allows_only_proper(self) -> None:
+    def test_other_company_does_not_reject_when_project_allows_only_proper(self) -> None:
         adjusted = resolve_proposal_commerce_flow(
             own_company_name="株式会社Kanana",
             talent_company_name="A",
@@ -71,18 +71,17 @@ class ProposalCommerceFlowTests(unittest.TestCase):
             commerce_flow=None,
         )
         self.assertEqual(adjusted, "一社先正社員")
-        self.assertEqual(
+        self.assertIsNone(
             hard_constraint_reject_reason(
                 project_foreign_nationality_ng=False,
                 talent_is_foreign_national=False,
                 project_commerce_flow_limit="エンド直まで",
                 talent_commerce_flow=adjusted,
                 talent_affiliation="正社員",
-            ),
-            "commerce_flow",
+            )
         )
 
-    def test_kisha_made_rejects_one_hop(self) -> None:
+    def test_kisha_made_does_not_reject_one_hop(self) -> None:
         adjusted = resolve_proposal_commerce_flow(
             own_company_name="株式会社Kanana",
             talent_company_name="A",
@@ -90,15 +89,14 @@ class ProposalCommerceFlowTests(unittest.TestCase):
             commerce_flow=None,
         )
         self.assertEqual(adjusted, "一社先正社員")
-        self.assertEqual(
+        self.assertIsNone(
             hard_constraint_reject_reason(
                 project_foreign_nationality_ng=False,
                 talent_is_foreign_national=False,
                 project_commerce_flow_limit="貴社まで",
                 talent_commerce_flow=adjusted,
                 talent_affiliation="正社員",
-            ),
-            "commerce_flow",
+            )
         )
 
     def test_issha_saki_allows_one_hop(self) -> None:

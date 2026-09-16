@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings, settings
+from app.dashboard_match_display import set_dashboard_pair_proposed
 from app.db_bootstrap import create_session_factory, ensure_schema
 from app.email_core_body import collect_core_strip_names, ensure_email_core_body
 from app.email_db import load_all_settings
@@ -362,6 +363,8 @@ def run_talent_propose_batch(
                     to_address=to_override if to_override is not None else to_address,
                     cc_addresses=cc_override if cc_override is not None else cc_addresses,
                 )
+                for match, project in items:
+                    set_dashboard_pair_proposed(session, talent.id, project.id, proposed=True)
                 session.commit()
                 stats.sent += 1
             except Exception as exc:  # noqa: BLE001

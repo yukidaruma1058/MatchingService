@@ -14,6 +14,7 @@ from app.setting_keys import (
     GMAIL_INGEST_LABEL_SETTING_KEYS,
     SETTING_KEY_AI_ASSIST_ENABLED,
     SETTING_KEY_AI_JUDGEMENT_TOP_N,
+    SETTING_KEY_DASHBOARD_RULE_SCORE_MIN,
     SETTING_KEY_OWN_COMPANY_NAME,
     SETTING_KEY_APPLY_FROM_ADDRESS,
     SETTING_KEY_GMAIL_OAUTH_CLIENT_ID,
@@ -66,6 +67,9 @@ def _to_response(raw: dict, request: Request) -> SettingsResponse:
         gmail_sort_label_project=_as_str(raw.get(SETTING_KEY_GMAIL_SORT_LABEL_PROJECT), "gmail_sort_label_project"),
         ai_assist_enabled=bool(raw.get(SETTING_KEY_AI_ASSIST_ENABLED, False)),
         ai_judgement_top_n=_as_int(raw.get(SETTING_KEY_AI_JUDGEMENT_TOP_N), 5, minimum=1, maximum=20),
+        dashboard_rule_score_min=_as_int(
+            raw.get(SETTING_KEY_DASHBOARD_RULE_SCORE_MIN), 50, minimum=0, maximum=100
+        ),
         own_company_name=str(raw.get(SETTING_KEY_OWN_COMPANY_NAME) or "").strip(),
         apply_from_address=str(raw.get(SETTING_KEY_APPLY_FROM_ADDRESS) or "").strip(),
         reply_keywords_ok=_as_str(raw.get(SETTING_KEY_REPLY_KEYWORDS_OK), "reply_keywords_ok"),
@@ -125,6 +129,8 @@ def update_settings(
         updates[SETTING_KEY_AI_ASSIST_ENABLED] = body.ai_assist_enabled
     if body.ai_judgement_top_n is not None:
         updates[SETTING_KEY_AI_JUDGEMENT_TOP_N] = body.ai_judgement_top_n
+    if body.dashboard_rule_score_min is not None:
+        updates[SETTING_KEY_DASHBOARD_RULE_SCORE_MIN] = body.dashboard_rule_score_min
     if body.own_company_name is not None:
         updates[SETTING_KEY_OWN_COMPANY_NAME] = body.own_company_name.strip()
     if body.apply_from_address is not None:

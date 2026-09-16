@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Iterable
 from uuid import UUID, uuid4
 
 from sqlalchemy import select, update
@@ -17,6 +17,28 @@ from app.skill_catalog import ensure_skills_in_master
 
 def load_all_settings(session: Session) -> dict[str, object]:
     return {row.key: row.value for row in session.scalars(select(SystemSetting)).all()}
+
+
+def already_ingested_gmail_ids(
+    session: Session,
+    gmail_message_ids: Iterable[str],
+    *,
+    retry_failed: bool = True,
+) -> set[str]:
+    """取込済みとみなす gmail_message_id 集合を返す。
+
+    retry_failed=True のとき status=failed は含まない（再取込対象）。
+    """
+    ids = [mid.strip() for mid in gmail_message_ids if (mid or "").strip()]
+    if not ids:
+        return set()
+    stmt = select(Email.gmail_message_id, Email.status).where(Email.gmail_message_id.in_(ids))
+    out: set[str] = set()
+    for gmail_id, status in session.execute(stmt).all():
+        if retry_failed and status == "failed":
+            continue
+        out.add(str(gmail_id))
+    return out
 
 
 def upsert_sorted_email(
@@ -191,6 +213,7 @@ def upsert_project_from_email(
 ) -> UUID:
     now = datetime.now().astimezone()
     required_skills = ensure_skills_in_master(session, data.get("required_skills") or [])
+    preferred_skills = ensure_skills_in_master(session, data.get("preferred_skills") or [])
     proposal_cc = list(data.get("proposal_cc_emails") or [])
     source_company_name = data.get("source_company_name")
 
@@ -204,6 +227,7 @@ def upsert_project_from_email(
         existing.project_code = data.get("project_code")
         existing.title = data["title"]
         existing.required_skills = required_skills
+        existing.preferred_skills = preferred_skills
         existing.rate_min = data.get("rate_min")
         existing.rate_max = data.get("rate_max")
         existing.location = data.get("location")
@@ -231,6 +255,7 @@ def upsert_project_from_email(
             project_code=data.get("project_code"),
             title=data["title"],
             required_skills=required_skills,
+            preferred_skills=preferred_skills,
             rate_min=data.get("rate_min"),
             rate_max=data.get("rate_max"),
             location=data.get("location"),

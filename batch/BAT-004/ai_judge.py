@@ -1,8 +1,8 @@
 """BAT-004: OK/NG 反映後の AI 判定。
 
 1. NG マッチのルールスコアを 0 にする
-2. 外国籍・商流のハード制約に抵触する場合は LLM を呼ばず 0 点にする
-   （自社名設定による商流調整はルール採点と同じ）
+2. 外国籍のハード制約に抵触する場合は LLM を呼ばず 0 点にする
+   （商流制限は足切りしない。自社名設定による商流調整はルール採点と同じ）
 3. 返信 NG 以外をルールスコア降順にし、案件ごと上位 N 人に LLM 判定
    （パイプライン自動実行時は返信前のため未判定も含む）
 4. match_ids 明示時は上記絞り込みをスキップして選択分を判定（ハード制約は適用）
@@ -94,6 +94,8 @@ class AiSettings(Protocol):
     openai_model: str
     anthropic_api_key: str
     anthropic_model: str
+    gemini_api_key: str
+    gemini_model: str
 
 
 def _load_setting(session: Session, key: str, default: Any = None) -> Any:
@@ -141,7 +143,7 @@ def _apply_hard_constraints(
     *,
     own_company_name: str | None,
 ) -> str | None:
-    """外国籍・商流に抵触すれば match を 0 点にして拒否コードを返す。OK なら None。"""
+    """外国籍に抵触すれば match を 0 点にして拒否コードを返す。OK なら None。"""
     code, adjusted = evaluate_match_hard_constraints(
         own_company_name=own_company_name,
         talent_company_name=_talent_company_name(session, talent),
@@ -231,7 +233,7 @@ def _build_llm_judge_prompt(
         "寄せた言い回しは避ける\n"
         "- スキル適合・稼働・単価・勤務形態など、両者のマッチ根拠を中立に述べる"
         "（例: 「Java/Spring の実務とリモート希望が本件要件と整合し、早期参画が期待できます。」）\n"
-        "※ 外国籍不可・商流制限のハード足切りは呼び出し側で実施済み。"
+        "※ 外国籍不可のハード足切りは呼び出し側で実施済み。商流制限は足切りしない。"
         "残る懸念があれば reason に短く触れてよいが、recommendation_points は前向きに保つ。\n"
         "必須スキルとスキルシート経験の評価:\n"
         "- 必須スキル一覧について、スキルシート経験（抜粋）にそのスキルを使った具体的な案件・業務があるか確認する。\n"
@@ -285,7 +287,8 @@ def _judge_with_llm(
 
     logger = get_batch_logger()
     raw_text = (
-        _call_cursor(prompt, cfg, logger=logger)
+        _call_gemini(prompt, cfg, logger=logger)
+        or _call_cursor(prompt, cfg, logger=logger)
         or _call_openai(prompt, cfg, logger=logger)
         or _call_claude(prompt, cfg, logger=logger)
     )
@@ -330,6 +333,70 @@ def _fallback_recommendation_points(talent: Talent, project: Project) -> str:
         )
     return "スキル・稼働条件の面で適合が見込め、前向きにご検討いただける組み合わせです。"
 
+
+_GEMINI_JUDGE_SYSTEM = (
+    "You are an SES matching evaluator. "
+    "recommendation_points must be reusable in both talent-proposal "
+    "and project-proposal emails (neutral fit appeal). "
+    "Reply with a single JSON object only: "
+    '{"ai_score": 0-100, "reason": "...", "recommendation_points": "..."}'
+)
+_GEMINI_JUDGE_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "ai_score": {"type": "INTEGER"},
+        "reason": {"type": "STRING"},
+        "recommendation_points": {"type": "STRING"},
+    },
+    "required": ["ai_score", "reason", "recommendation_points"],
+}
+
+
+def _call_gemini(prompt: str, cfg: AiSettings, *, logger: logging.Logger | None = None) -> str | None:
+    api_key = getattr(cfg, "gemini_api_key", "") or ""
+    if not str(api_key).strip():
+        return None
+    try:
+        from app.gemini_llm import call_gemini_json
+    except ImportError as exc:
+        if logger is not None:
+            log_error_event(
+                logger,
+                event="matching.ai_judge.gemini_unavailable",
+                error_code="ERR-0030",
+                detail=str(exc),
+                operation="AI判定 Gemini",
+                method_name="_call_gemini",
+                job_id="ai_judge",
+                function_id="BAT-004",
+                module_name="BAT-004.ai_judge",
+            )
+        return None
+
+    try:
+        return call_gemini_json(
+            api_key=str(api_key),
+            model=getattr(cfg, "gemini_model", None),
+            system=_GEMINI_JUDGE_SYSTEM,
+            user=prompt,
+            response_schema=_GEMINI_JUDGE_SCHEMA,
+            temperature=0.2,
+            purpose="ai_judge",
+        )
+    except Exception as exc:  # noqa: BLE001
+        if logger is not None:
+            log_error_event(
+                logger,
+                event="matching.ai_judge.gemini_failed",
+                error_code="ERR-0030",
+                detail=str(exc),
+                operation="AI判定 Gemini",
+                method_name="_call_gemini",
+                job_id="ai_judge",
+                function_id="BAT-004",
+                module_name="BAT-004.ai_judge",
+            )
+        return None
 
 
 def _call_cursor(prompt: str, cfg: AiSettings, *, logger: logging.Logger | None = None) -> str | None:

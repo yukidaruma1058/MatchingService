@@ -15,7 +15,11 @@ from sqlalchemy.orm import Session
 from app.batch_runner import BatchRunTimeoutError, read_last_batch_error, run_batch_job, start_batch_job
 from app.deps import get_db
 from app.entity_delete import delete_project_cascade
-from app.manual_entity import create_manual_placeholder_email
+from app.manual_entity import (
+    create_manual_placeholder_email,
+    is_plausible_email_address,
+    normalize_manual_from_address,
+)
 from app.match_run_query import latest_completed_match_run
 from app.models import (
     Company,
@@ -82,6 +86,7 @@ class ProjectUpdateRequest(BaseModel):
     title: str | None = Field(None, min_length=1, max_length=255)
     project_code: str | None = Field(None, max_length=32)
     required_skills: list[str] | None = None
+    preferred_skills: list[str] | None = None
     rate_min: int | None = Field(None, ge=0, le=1000)
     rate_max: int | None = Field(None, ge=0, le=1000)
     location: str | None = Field(None, max_length=128)
@@ -103,6 +108,7 @@ class ProjectCreateRequest(BaseModel):
 
     title: str = Field(..., min_length=1, max_length=255)
     body: str = Field(..., min_length=1)
+    from_address: str | None = Field(None, max_length=255)
 
 
 @dataclass(frozen=True)
@@ -212,12 +218,14 @@ def _to_list_item(
     email_received_at: str | None = None,
 ) -> ProjectListItem:
     skills = row.required_skills if isinstance(row.required_skills, list) else []
+    preferred = row.preferred_skills if isinstance(row.preferred_skills, list) else []
     stats = proposed or ProposedTalentStats()
     return ProjectListItem(
         id=str(row.id),
         title=row.title,
         project_code=row.project_code,
         required_skills=[str(s) for s in skills],
+        preferred_skills=[str(s) for s in preferred],
         rate_min=row.rate_min,
         rate_max=row.rate_max,
         location=row.location,
@@ -312,6 +320,7 @@ def create_project(body: ProjectCreateRequest, session: Session = Depends(get_db
     """タイトル+本文を AI 要約して案件登録する。ルール採点はバックグラウンドで実行する。"""
     title = body.title.strip()
     text = body.body.strip()
+    from_address = normalize_manual_from_address(body.from_address)
     if not title:
         raise HTTPException(
             status_code=400,
@@ -322,12 +331,18 @@ def create_project(body: ProjectCreateRequest, session: Session = Depends(get_db
             status_code=400,
             detail={"error_code": "ERR-0001", "error_message": "本文を入力してください。"},
         )
+    if body.from_address and body.from_address.strip() and not is_plausible_email_address(from_address):
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "ERR-0001", "error_message": "メールアドレスの形式が正しくありません。"},
+        )
 
     email = create_manual_placeholder_email(
         session,
         email_type="project",
         subject=title,
         body_text=text,
+        from_address=from_address,
     )
     email_id = email.id
     session.commit()
@@ -414,6 +429,8 @@ def update_project(
         row.project_code = str(text).strip() if text is not None and str(text).strip() else None
     if "required_skills" in updates:
         row.required_skills = _normalize_string_list(updates["required_skills"])
+    if "preferred_skills" in updates:
+        row.preferred_skills = _normalize_string_list(updates["preferred_skills"])
     if "rate_min" in updates:
         row.rate_min = updates["rate_min"]
     if "rate_max" in updates:

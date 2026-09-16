@@ -882,6 +882,15 @@ button.line-chart-legend-toggle.is-off .line-chart-swatch {
   background: rgba(15, 92, 76, 0.06);
 }
 
+.table tr.is-inactive td {
+  color: #3f3c37;
+  background: #cfc9bf;
+}
+
+.table tr.is-inactive a {
+  color: #3f3c37;
+}
+
 .table tr.email-body-row td {
   background: rgba(15, 92, 76, 0.04);
   padding: 0 12px 12px;
@@ -1799,6 +1808,11 @@ button.line-chart-legend-toggle.is-off .line-chart-swatch {
   color: var(--muted);
   border-bottom: 1px dotted rgba(15, 92, 76, 0.35);
   white-space: nowrap;
+}
+
+.skills-truncated {
+  cursor: help;
+  border-bottom: 1px dotted rgba(15, 92, 76, 0.35);
 }
 
 .th-sort {

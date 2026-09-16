@@ -10,13 +10,11 @@ from __future__ import annotations
 import logging
 import os
 import time
-import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Literal
 from uuid import UUID
 
-from commute import get_monthly_usage, resolve_commute_minutes
 from db import (
     abandon_stuck_match_runs,
     create_match_run,
@@ -31,7 +29,7 @@ from db import (
     match_row_from_existing,
     update_match_score,
 )
-from scorer import is_full_remote, score_pair
+from scorer import prepare_project_skills, prepare_talent_skills, score_pair_job
 
 from app.batch_job_id import resolve_batch_job_id
 from app.config import Settings, settings
@@ -40,8 +38,10 @@ from app.logging_util import get_batch_logger, log_error_event, log_event
 
 Trigger = Literal["batch_auto", "manual"]
 
-_COMMUTE_PARALLEL = 4
-
+_SCORE_WORKERS_DEFAULT = 4
+_PARALLEL_MIN_PAIRS = 2000
+# 増分採点の 1 チャンクサイズ（途中 commit してタイムアウト時も進捗を残す）
+_INCREMENTAL_CHUNK = 5000
 
 def _parse_uuid_list(raw: str | None) -> list[UUID]:
     if not raw or not raw.strip():
@@ -54,11 +54,9 @@ def _parse_uuid_list(raw: str | None) -> list[UUID]:
         out.append(UUID(text))
     return out
 
-
 def _env_force_rescore() -> bool:
     raw = (os.environ.get("MATCH_FORCE_RESCORE") or "").strip().lower()
     return raw in {"1", "true", "yes", "on"}
-
 
 def _talent_company_name(session, talent) -> str | None:
     company_id = getattr(talent, "introducer_company_id", None)
@@ -71,16 +69,12 @@ def _talent_company_name(session, talent) -> str | None:
     name = (getattr(talent, "source_company_name", None) or "").strip()
     return name or None
 
-
-def _score_kwargs(
+def _talent_score_features(
     talent,
-    project,
     *,
-    commute_resolved: bool,
-    commute_minutes: int | None = None,
-    own_company_name: str | None = None,
-    talent_company_name: str | None = None,
-) -> dict:
+    own_company_name: str | None,
+    talent_company_name: str | None,
+) -> dict[str, Any]:
     from app.constraint_rules import resolve_proposal_commerce_flow
 
     adjusted_commerce = resolve_proposal_commerce_flow(
@@ -90,24 +84,75 @@ def _score_kwargs(
         commerce_flow=getattr(talent, "commerce_flow", None),
     )
     return {
-        "talent_skills": talent.skills if isinstance(talent.skills, list) else [],
-        "required_skills": project.required_skills if isinstance(project.required_skills, list) else [],
+        "talent_skills_prepared": prepare_talent_skills(
+            talent.skills if isinstance(talent.skills, list) else [],
+            getattr(talent, "summary", None),
+        ),
         "desired_rate": talent.desired_rate,
-        "rate_min": project.rate_min,
-        "rate_max": project.rate_max,
         "available_from": talent.available_from,
-        "start_date": project.start_date,
         "talent_work_style": talent.work_style,
-        "project_work_style": project.work_style,
-        "commute_minutes": commute_minutes,
-        "commute_resolved": commute_resolved,
-        "project_foreign_nationality_ng": bool(getattr(project, "foreign_nationality_ng", False)),
         "talent_is_foreign_national": getattr(talent, "is_foreign_national", None),
-        "project_commerce_flow_limit": getattr(project, "commerce_flow_limit", None),
         "talent_commerce_flow": adjusted_commerce or None,
         "talent_affiliation": getattr(talent, "affiliation", None),
     }
 
+def _project_score_features(project) -> dict[str, Any]:
+    return {
+        "required_skills_prepared": prepare_project_skills(
+            project.required_skills if isinstance(project.required_skills, list) else []
+        ),
+        "preferred_skills_prepared": prepare_project_skills(
+            project.preferred_skills if isinstance(getattr(project, "preferred_skills", None), list) else []
+        ),
+        "rate_min": project.rate_min,
+        "rate_max": project.rate_max,
+        "start_date": project.start_date,
+        "project_work_style": project.work_style,
+        "project_foreign_nationality_ng": bool(getattr(project, "foreign_nationality_ng", False)),
+        "project_commerce_flow_limit": getattr(project, "commerce_flow_limit", None),
+    }
+
+def _resolve_score_workers(pair_count: int) -> int:
+    if pair_count < _PARALLEL_MIN_PAIRS:
+        return 1
+    cpu = os.cpu_count() or 1
+    raw = (os.environ.get("MATCH_SCORE_WORKERS") or "").strip()
+    if raw:
+        try:
+            requested = int(raw)
+        except ValueError:
+            requested = _SCORE_WORKERS_DEFAULT
+    else:
+        requested = _SCORE_WORKERS_DEFAULT
+    return max(1, min(_SCORE_WORKERS_DEFAULT, cpu, requested, pair_count))
+
+def _score_payloads(
+    pair_keys: list[tuple[UUID, UUID]],
+    talent_features: dict[UUID, dict[str, Any]],
+    project_features: dict[UUID, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "talent_id": talent_id,
+            "project_id": project_id,
+            **talent_features[talent_id],
+            **project_features[project_id],
+        }
+        for talent_id, project_id in pair_keys
+    ]
+
+def _map_score_jobs(
+    payloads: list[dict[str, Any]],
+    *,
+    executor: ProcessPoolExecutor | None,
+    workers: int,
+) -> list[dict[str, Any]]:
+    if not payloads:
+        return []
+    if executor is None or workers <= 1 or len(payloads) < 32:
+        return [score_pair_job(payload) for payload in payloads]
+    chunksize = max(32, len(payloads) // (workers * 8))
+    return list(executor.map(score_pair_job, payloads, chunksize=chunksize))
 
 @dataclass
 class MatchBatchStats:
@@ -122,7 +167,6 @@ class MatchBatchStats:
     commute_skipped_remote: int = 0
     force_rescore: bool = False
     warnings: list[str] = field(default_factory=list)
-
 
 class MatchScoreBatch:
     function_id = "BAT-003"
@@ -174,112 +218,116 @@ class MatchScoreBatch:
 
         match_run_id: UUID | None = None
         try:
-            with session_factory() as session:
-                from sqlalchemy import func, select
+            try:
+                with session_factory() as session:
+                    from sqlalchemy import func, select
 
-                from app.models import Match
+                    from app.models import Match
 
-                top_n_raw = load_setting(session, "ai_judgement_top_n", 5)
-                try:
-                    top_n = max(1, min(20, int(top_n_raw)))
-                except (TypeError, ValueError):
-                    top_n = 5
-                ai_assist = bool(load_setting(session, "ai_assist_enabled", False))
-                own_company_raw = load_setting(session, "own_company_name", "")
-                own_company_name = str(own_company_raw or "").strip() or None
+                    top_n_raw = load_setting(session, "ai_judgement_top_n", 5)
+                    try:
+                        top_n = max(1, min(20, int(top_n_raw)))
+                    except (TypeError, ValueError):
+                        top_n = 5
+                    ai_assist = bool(load_setting(session, "ai_assist_enabled", False))
+                    own_company_raw = load_setting(session, "own_company_name", "")
+                    own_company_name = str(own_company_raw or "").strip() or None
 
-                abandon_stuck_match_runs(session, reason="superseded_by_match_batch")
-                session.flush()
+                    abandon_stuck_match_runs(session, reason="superseded_by_match_batch")
+                    session.flush()
 
-                scoped_projects = self.scope_project_ids or None
-                scoped_talents = self.scope_talent_ids or None
-                # 片方だけ指定: 相手側は全件
-                if scoped_projects is not None and not scoped_projects:
-                    scoped_projects = None
-                if scoped_talents is not None and not scoped_talents:
-                    scoped_talents = None
+                    scoped_projects = self.scope_project_ids or None
+                    scoped_talents = self.scope_talent_ids or None
+                    # 片方だけ指定: 相手側は全件
+                    if scoped_projects is not None and not scoped_projects:
+                        scoped_projects = None
+                    if scoped_talents is not None and not scoped_talents:
+                        scoped_talents = None
 
-                if scoped_projects is not None and scoped_talents is None:
-                    projects = list_open_projects(session, project_ids=scoped_projects)
-                    talents = list_active_talents(session)
-                elif scoped_talents is not None and scoped_projects is None:
-                    talents = list_active_talents(session, talent_ids=scoped_talents)
-                    projects = list_open_projects(session)
-                elif scoped_projects is not None and scoped_talents is not None:
-                    projects = list_open_projects(session, project_ids=scoped_projects)
-                    talents = list_active_talents(session, talent_ids=scoped_talents)
-                else:
-                    talents = list_active_talents(session)
-                    projects = list_open_projects(session)
+                    if scoped_projects is not None and scoped_talents is None:
+                        projects = list_open_projects(session, project_ids=scoped_projects)
+                        talents = list_active_talents(session)
+                    elif scoped_talents is not None and scoped_projects is None:
+                        talents = list_active_talents(session, talent_ids=scoped_talents)
+                        projects = list_open_projects(session)
+                    elif scoped_projects is not None and scoped_talents is not None:
+                        projects = list_open_projects(session, project_ids=scoped_projects)
+                        talents = list_active_talents(session, talent_ids=scoped_talents)
+                    else:
+                        talents = list_active_talents(session)
+                        projects = list_open_projects(session)
 
-                stats.talent_count = len(talents)
-                stats.project_count = len(projects)
-                talent_company_names = {t.id: _talent_company_name(session, t) for t in talents}
-                talent_map = {t.id: t for t in talents}
-                project_map = {p.id: p for p in projects}
-                talent_ids = [t.id for t in talents]
-                project_ids = [p.id for p in projects]
+                    stats.talent_count = len(talents)
+                    stats.project_count = len(projects)
+                    talent_company_names = {t.id: _talent_company_name(session, t) for t in talents}
+                    talent_ids = [t.id for t in talents]
+                    project_ids = [p.id for p in projects]
+                    talent_features = {
+                        t.id: _talent_score_features(
+                            t,
+                            own_company_name=own_company_name,
+                            talent_company_name=talent_company_names.get(t.id),
+                        )
+                        for t in talents
+                    }
+                    project_features = {p.id: _project_score_features(p) for p in projects}
 
-                if not talents or not projects:
-                    log_error_event(
-                        self.logger,
-                        event="matching.rule_score.failed",
-                        error_code="ERR-0026",
-                        detail="マッチング対象がありません。",
-                        operation="ルールスコア採点",
-                        method_name="run",
-                        job_id=self.job_id,
-                        function_id=self.function_id,
-                        module_name="BAT-003.match_score",
-                    )
-                    session.commit()
-                    return None, stats
+                    if not talents or not projects:
+                        log_error_event(
+                            self.logger,
+                            event="matching.rule_score.failed",
+                            error_code="ERR-0026",
+                            detail="マッチング対象がありません。",
+                            operation="ルールスコア採点",
+                            method_name="run",
+                            job_id=self.job_id,
+                            function_id=self.function_id,
+                            module_name="BAT-003.match_score",
+                        )
+                        session.commit()
+                        return None, stats
 
-                if self.force_rescore:
-                    scoped = scoped_projects is not None or scoped_talents is not None
-                    runner = self._run_scoped_rescore if scoped else self._run_force_rescore
-                    match_run_id, stats = runner(
-                        session,
-                        stats=stats,
-                        talents=talents,
-                        projects=projects,
-                        talent_map=talent_map,
-                        project_map=project_map,
-                        talent_company_names=talent_company_names,
-                        own_company_name=own_company_name,
-                        top_n=top_n,
-                        ai_assist=ai_assist,
-                    )
-                    session.commit()
-                else:
-                    match_run_id, stats = self._run_incremental(
-                        session,
-                        stats=stats,
-                        talents=talents,
-                        projects=projects,
-                        talent_ids=talent_ids,
-                        project_ids=project_ids,
-                        talent_map=talent_map,
-                        project_map=project_map,
-                        talent_company_names=talent_company_names,
-                        own_company_name=own_company_name,
-                        top_n=top_n,
-                        ai_assist=ai_assist,
-                    )
-                    session.commit()
-        except Exception as exc:
-            log_error_event(
-                self.logger,
-                event="matching.rule_score.failed",
-                error_code="ERR-0030",
-                detail=str(exc),
-                operation="ルールスコア採点",
-                method_name="run",
-                job_id=self.job_id,
-                function_id=self.function_id,
-                module_name="BAT-003.match_score",
-            )
-            raise
+                    if self.force_rescore:
+                        scoped = scoped_projects is not None or scoped_talents is not None
+                        runner = self._run_scoped_rescore if scoped else self._run_force_rescore
+                        match_run_id, stats = runner(
+                            session,
+                            stats=stats,
+                            talents=talents,
+                            projects=projects,
+                            talent_features=talent_features,
+                            project_features=project_features,
+                            top_n=top_n,
+                            ai_assist=ai_assist,
+                        )
+                        session.commit()
+                    else:
+                        match_run_id, stats = self._run_incremental(
+                            session,
+                            stats=stats,
+                            talent_ids=talent_ids,
+                            project_ids=project_ids,
+                            talent_features=talent_features,
+                            project_features=project_features,
+                            top_n=top_n,
+                            ai_assist=ai_assist,
+                        )
+                        session.commit()
+            except Exception as exc:
+                log_error_event(
+                    self.logger,
+                    event="matching.rule_score.failed",
+                    error_code="ERR-0030",
+                    detail=str(exc),
+                    operation="ルールスコア採点",
+                    method_name="run",
+                    job_id=self.job_id,
+                    function_id=self.function_id,
+                    module_name="BAT-003.match_score",
+                )
+                raise
+        finally:
+            engine.dispose()
 
         duration_ms = int((time.perf_counter() - started) * 1000)
         log_event(
@@ -309,14 +357,10 @@ class MatchScoreBatch:
         session,
         *,
         stats: MatchBatchStats,
-        talents,
-        projects,
         talent_ids: list[UUID],
         project_ids: list[UUID],
-        talent_map,
-        project_map,
-        talent_company_names,
-        own_company_name: str | None,
+        talent_features: dict[UUID, dict[str, Any]],
+        project_features: dict[UUID, dict[str, Any]],
         top_n: int,
         ai_assist: bool,
     ) -> tuple[UUID | None, MatchBatchStats]:
@@ -345,37 +389,6 @@ class MatchScoreBatch:
             )
             return (latest.id if latest else None), stats
 
-        historical = list_latest_match_by_pair_keys(session, pair_keys=missing_keys)
-        rows_to_insert: list[dict[str, Any]] = []
-        for talent_id, project_id in missing_keys:
-            prior = historical.get((talent_id, project_id))
-            if prior is not None:
-                rows_to_insert.append(match_row_from_existing(prior))
-                stats.reused_count += 1
-                continue
-            talent = talent_map[talent_id]
-            project = project_map[project_id]
-            result = score_pair(
-                **_score_kwargs(
-                    talent,
-                    project,
-                    commute_resolved=False,
-                    own_company_name=own_company_name,
-                    talent_company_name=talent_company_names.get(talent.id),
-                )
-            )
-            rows_to_insert.append(
-                {
-                    "talent_id": talent.id,
-                    "project_id": project.id,
-                    "score": result.score,
-                    "score_band": result.score_band,
-                    "score_breakdown": result.breakdown,
-                    "reused": False,
-                }
-            )
-            stats.scored_count += 1
-
         if latest is None:
             latest = create_match_run(
                 session,
@@ -383,25 +396,54 @@ class MatchScoreBatch:
                 top_n=top_n,
                 ai_assist_enabled=ai_assist,
             )
+            session.flush()
         match_run_id = latest.id
 
-        inserted = insert_matches(session, match_run_id=latest.id, rows=rows_to_insert)
-        newly_scored = [
-            match
-            for match, row in zip(inserted, rows_to_insert, strict=True)
-            if not row.get("reused")
-        ]
-        self._pass2_commute(
-            session,
-            stats=stats,
-            latest_run_id=latest.id,
-            newly_scored=newly_scored,
-            talent_map=talent_map,
-            project_map=project_map,
-            talent_company_names=talent_company_names,
-            own_company_name=own_company_name,
-            top_n=top_n,
-        )
+        workers = _resolve_score_workers(len(missing_keys))
+        total_missing = len(missing_keys)
+        executor: ProcessPoolExecutor | None = None
+        if workers > 1:
+            executor = ProcessPoolExecutor(max_workers=workers)
+        try:
+            for chunk_start in range(0, total_missing, _INCREMENTAL_CHUNK):
+                chunk_keys = missing_keys[chunk_start : chunk_start + _INCREMENTAL_CHUNK]
+                historical = list_latest_match_by_pair_keys(session, pair_keys=chunk_keys)
+                rows_to_insert: list[dict[str, Any]] = []
+                to_score: list[tuple[UUID, UUID]] = []
+                for talent_id, project_id in chunk_keys:
+                    prior = historical.get((talent_id, project_id))
+                    if prior is not None:
+                        rows_to_insert.append(match_row_from_existing(prior))
+                        stats.reused_count += 1
+                        continue
+                    to_score.append((talent_id, project_id))
+                scored_rows = _map_score_jobs(
+                    _score_payloads(to_score, talent_features, project_features),
+                    executor=executor,
+                    workers=workers,
+                )
+                scored_by_key = {
+                    (row["talent_id"], row["project_id"]): row for row in scored_rows
+                }
+                for talent_id, project_id in to_score:
+                    scored = scored_by_key[(talent_id, project_id)]
+                    rows_to_insert.append(
+                        {
+                            "talent_id": talent_id,
+                            "project_id": project_id,
+                            "score": scored["score"],
+                            "score_band": scored["score_band"],
+                            "score_breakdown": scored["score_breakdown"],
+                            "reused": False,
+                        }
+                    )
+                    stats.scored_count += 1
+
+                insert_matches(session, match_run_id=latest.id, rows=rows_to_insert)
+                session.commit()
+        finally:
+            if executor is not None:
+                executor.shutdown(wait=True)
 
         total_matches = (
             session.scalar(
@@ -428,7 +470,6 @@ class MatchScoreBatch:
                 "commute_cache_hits": stats.commute_cache_hits,
                 "commute_skipped_limit": stats.commute_skipped_limit,
                 "commute_skipped_remote": stats.commute_skipped_remote,
-                "google_routes_usage": get_monthly_usage(session),
                 "incremental": True,
                 "force_rescore": False,
             },
@@ -442,10 +483,8 @@ class MatchScoreBatch:
         stats: MatchBatchStats,
         talents,
         projects,
-        talent_map,
-        project_map,
-        talent_company_names,
-        own_company_name: str | None,
+        talent_features: dict[UUID, dict[str, Any]],
+        project_features: dict[UUID, dict[str, Any]],
         top_n: int,
         ai_assist: bool,
     ) -> tuple[UUID | None, MatchBatchStats]:
@@ -483,63 +522,56 @@ class MatchScoreBatch:
         }
         historical = list_latest_match_by_pair_keys(session, pair_keys=pair_keys)
 
-        insert_rows: list[dict[str, Any]] = []
-        updated: list = []
-        for talent in talents:
-            for project in projects:
-                result = score_pair(
-                    **_score_kwargs(
-                        talent,
-                        project,
-                        commute_resolved=False,
-                        own_company_name=own_company_name,
-                        talent_company_name=talent_company_names.get(talent.id),
-                    )
-                )
-                current = existing.get((talent.id, project.id))
-                if current is not None:
-                    update_match_score(
-                        session,
-                        match_id=current.id,
-                        score=result.score,
-                        score_band=result.score_band,
-                        breakdown=result.breakdown,
-                    )
-                    updated.append(current)
-                    stats.scored_count += 1
-                    continue
-                prior = historical.get((talent.id, project.id))
-                row: dict[str, Any] = {
-                    "talent_id": talent.id,
-                    "project_id": project.id,
-                    "score": result.score,
-                    "score_band": result.score_band,
-                    "score_breakdown": result.breakdown,
-                    "reused": False,
-                }
-                if prior is not None:
-                    row["ai_score"] = prior.ai_score
-                    row["reason"] = prior.reason
-                    row["recommendation_points"] = prior.recommendation_points
-                    row["ai_judged_at"] = prior.ai_judged_at
-                    row["is_candidate"] = bool(prior.is_candidate)
-                insert_rows.append(row)
-                stats.scored_count += 1
-
-        inserted = insert_matches(session, match_run_id=latest.id, rows=insert_rows) if insert_rows else []
-        newly_scored = [*updated, *inserted]
-        session.flush()
-        self._pass2_commute(
-            session,
-            stats=stats,
-            latest_run_id=latest.id,
-            newly_scored=newly_scored,
-            talent_map=talent_map,
-            project_map=project_map,
-            talent_company_names=talent_company_names,
-            own_company_name=own_company_name,
-            top_n=top_n,
+        workers = _resolve_score_workers(len(pair_keys))
+        executor: ProcessPoolExecutor | None = (
+            ProcessPoolExecutor(max_workers=workers) if workers > 1 else None
         )
+        try:
+            scored_rows = _map_score_jobs(
+                _score_payloads(pair_keys, talent_features, project_features),
+                executor=executor,
+                workers=workers,
+            )
+        finally:
+            if executor is not None:
+                executor.shutdown(wait=True)
+        scored_by_key = {(row["talent_id"], row["project_id"]): row for row in scored_rows}
+
+        insert_rows: list[dict[str, Any]] = []
+        for talent_id, project_id in pair_keys:
+            scored = scored_by_key[(talent_id, project_id)]
+            current = existing.get((talent_id, project_id))
+            if current is not None:
+                update_match_score(
+                    session,
+                    match_id=current.id,
+                    score=scored["score"],
+                    score_band=scored["score_band"],
+                    breakdown=scored["score_breakdown"],
+                )
+                stats.scored_count += 1
+                continue
+            prior = historical.get((talent_id, project_id))
+            row: dict[str, Any] = {
+                "talent_id": talent_id,
+                "project_id": project_id,
+                "score": scored["score"],
+                "score_band": scored["score_band"],
+                "score_breakdown": scored["score_breakdown"],
+                "reused": False,
+            }
+            if prior is not None:
+                row["ai_score"] = prior.ai_score
+                row["reason"] = prior.reason
+                row["recommendation_points"] = prior.recommendation_points
+                row["ai_judged_at"] = prior.ai_judged_at
+                row["is_candidate"] = bool(prior.is_candidate)
+            insert_rows.append(row)
+            stats.scored_count += 1
+
+        if insert_rows:
+            insert_matches(session, match_run_id=latest.id, rows=insert_rows)
+        session.flush()
         stats.match_count = int(
             session.scalar(select(func.count()).select_from(Match).where(Match.match_run_id == latest.id))
             or 0
@@ -555,11 +587,7 @@ class MatchScoreBatch:
                 "scored_count": stats.scored_count,
                 "reused_count": 0,
                 "top_n": top_n,
-                "commute_api_calls": stats.commute_api_calls,
-                "commute_cache_hits": stats.commute_cache_hits,
-                "commute_skipped_limit": stats.commute_skipped_limit,
-                "commute_skipped_remote": stats.commute_skipped_remote,
-                "google_routes_usage": get_monthly_usage(session),
+                "commute_api_calls": 0,
                 "incremental": False,
                 "force_rescore": True,
                 "scoped": True,
@@ -574,10 +602,8 @@ class MatchScoreBatch:
         stats: MatchBatchStats,
         talents,
         projects,
-        talent_map,
-        project_map,
-        talent_company_names,
-        own_company_name: str | None,
+        talent_features: dict[UUID, dict[str, Any]],
+        project_features: dict[UUID, dict[str, Any]],
         top_n: int,
         ai_assist: bool,
     ) -> tuple[UUID | None, MatchBatchStats]:
@@ -586,56 +612,51 @@ class MatchScoreBatch:
         from app.models import Match
 
         pair_keys = [(t.id, p.id) for p in projects for t in talents]
-        historical = list_latest_match_by_pair_keys(session, pair_keys=pair_keys)
-
         run = create_match_run(
             session,
             trigger=self.trigger,
             top_n=top_n,
             ai_assist_enabled=ai_assist,
         )
-        rows: list[dict[str, Any]] = []
-        for talent in talents:
-            for project in projects:
-                result = score_pair(
-                    **_score_kwargs(
-                        talent,
-                        project,
-                        commute_resolved=False,
-                        own_company_name=own_company_name,
-                        talent_company_name=talent_company_names.get(talent.id),
-                    )
-                )
-                prior = historical.get((talent.id, project.id))
-                row: dict[str, Any] = {
-                    "talent_id": talent.id,
-                    "project_id": project.id,
-                    "score": result.score,
-                    "score_band": result.score_band,
-                    "score_breakdown": result.breakdown,
-                    "reused": False,
-                }
-                if prior is not None:
-                    row["ai_score"] = prior.ai_score
-                    row["reason"] = prior.reason
-                    row["recommendation_points"] = prior.recommendation_points
-                    row["ai_judged_at"] = prior.ai_judged_at
-                    row["is_candidate"] = bool(prior.is_candidate)
-                rows.append(row)
-                stats.scored_count += 1
-
-        inserted = insert_matches(session, match_run_id=run.id, rows=rows)
-        self._pass2_commute(
-            session,
-            stats=stats,
-            latest_run_id=run.id,
-            newly_scored=inserted,
-            talent_map=talent_map,
-            project_map=project_map,
-            talent_company_names=talent_company_names,
-            own_company_name=own_company_name,
-            top_n=top_n,
+        workers = _resolve_score_workers(len(pair_keys))
+        executor: ProcessPoolExecutor | None = (
+            ProcessPoolExecutor(max_workers=workers) if workers > 1 else None
         )
+        try:
+            for chunk_start in range(0, len(pair_keys), _INCREMENTAL_CHUNK):
+                chunk = pair_keys[chunk_start : chunk_start + _INCREMENTAL_CHUNK]
+                historical = list_latest_match_by_pair_keys(session, pair_keys=chunk)
+                scored_rows = _map_score_jobs(
+                    _score_payloads(chunk, talent_features, project_features),
+                    executor=executor,
+                    workers=workers,
+                )
+                scored_by_key = {(row["talent_id"], row["project_id"]): row for row in scored_rows}
+                rows: list[dict[str, Any]] = []
+                for talent_id, project_id in chunk:
+                    scored = scored_by_key[(talent_id, project_id)]
+                    prior = historical.get((talent_id, project_id))
+                    row = {
+                        "talent_id": talent_id,
+                        "project_id": project_id,
+                        "score": scored["score"],
+                        "score_band": scored["score_band"],
+                        "score_breakdown": scored["score_breakdown"],
+                        "reused": False,
+                    }
+                    if prior is not None:
+                        row["ai_score"] = prior.ai_score
+                        row["reason"] = prior.reason
+                        row["recommendation_points"] = prior.recommendation_points
+                        row["ai_judged_at"] = prior.ai_judged_at
+                        row["is_candidate"] = bool(prior.is_candidate)
+                    rows.append(row)
+                    stats.scored_count += 1
+                insert_matches(session, match_run_id=run.id, rows=rows)
+                session.flush()
+        finally:
+            if executor is not None:
+                executor.shutdown(wait=True)
         stats.match_count = int(
             session.scalar(select(func.count()).select_from(Match).where(Match.match_run_id == run.id))
             or 0
@@ -651,159 +672,12 @@ class MatchScoreBatch:
                 "scored_count": stats.scored_count,
                 "reused_count": 0,
                 "top_n": top_n,
-                "commute_api_calls": stats.commute_api_calls,
-                "commute_cache_hits": stats.commute_cache_hits,
-                "commute_skipped_limit": stats.commute_skipped_limit,
-                "commute_skipped_remote": stats.commute_skipped_remote,
-                "google_routes_usage": get_monthly_usage(session),
+                "commute_api_calls": 0,
                 "incremental": False,
                 "force_rescore": True,
             },
         )
         return run.id, stats
-
-    def _pass2_commute(
-        self,
-        session,
-        *,
-        stats: MatchBatchStats,
-        latest_run_id: UUID,
-        newly_scored: list,
-        talent_map,
-        project_map,
-        talent_company_names,
-        own_company_name: str | None,
-        top_n: int,
-    ) -> None:
-        from sqlalchemy import select
-
-        from app.models import Match
-
-        if not newly_scored:
-            return
-
-        monthly_before = get_monthly_usage(session)
-        if monthly_before >= self.cfg.google_routes_monthly_warn:
-            msg = f"Google Routes usage {monthly_before} >= warn {self.cfg.google_routes_monthly_warn}"
-            stats.warnings.append(msg)
-            log_event(
-                self.logger,
-                logging.WARNING,
-                event="matching.commute.usage_warning",
-                message=msg,
-                operation="通勤API利用量",
-                method_name="run",
-                job_id=self.job_id,
-                function_id=self.function_id,
-                module_name="BAT-003.match_score",
-                extra={"usage": monthly_before, "limit": self.cfg.google_routes_monthly_limit},
-            )
-
-        newly_ids = {m.id for m in newly_scored}
-        affected_project_ids = {m.project_id for m in newly_scored}
-        commute_jobs: list[tuple[Any, Any, Any]] = []
-
-        for project_id in affected_project_ids:
-            project = project_map[project_id]
-            project_matches = list(
-                session.scalars(
-                    select(Match).where(
-                        Match.match_run_id == latest_run_id,
-                        Match.project_id == project_id,
-                    )
-                ).all()
-            )
-            rows_sorted = sorted(project_matches, key=lambda m: m.score, reverse=True)
-            top_rows = rows_sorted[:top_n]
-            remote = is_full_remote(project.work_style)
-
-            for match in top_rows:
-                if match.id not in newly_ids:
-                    continue
-                talent = talent_map[match.talent_id]
-                if remote:
-                    score_kwargs = _score_kwargs(
-                        talent,
-                        project,
-                        commute_resolved=True,
-                        own_company_name=own_company_name,
-                        talent_company_name=talent_company_names.get(talent.id),
-                    )
-                    score_kwargs["project_work_style"] = project.work_style or "フルリモート"
-                    result = score_pair(**score_kwargs)
-                    update_match_score(
-                        session,
-                        match_id=match.id,
-                        score=result.score,
-                        score_band=result.score_band,
-                        breakdown=result.breakdown,
-                    )
-                    stats.commute_skipped_remote += 1
-                    continue
-                commute_jobs.append((match, talent, project))
-
-        if not commute_jobs:
-            return
-
-        def _resolve_one(job: tuple[Any, Any, Any]) -> tuple[UUID, int | None, str, bool]:
-            match, talent, project = job
-            # キャッシュ読みは別セッション相当が理想だが、ここでは共有 session を避け
-            # API 呼び出しだけ並列化し、結果適用は呼び出し側で直列にする。
-            from app.db_bootstrap import create_session_factory as _csf
-
-            factory, _ = _csf(self.cfg.database_url)
-            with factory() as local_session:
-                minutes, status, called = resolve_commute_minutes(
-                    local_session,
-                    api_key=self.cfg.google_maps_api_key,
-                    origin=talent.nearest_station,
-                    destination=project.location,
-                    monthly_warn=self.cfg.google_routes_monthly_warn,
-                    monthly_limit=self.cfg.google_routes_monthly_limit,
-                    logger=self.logger,
-                )
-                local_session.commit()
-            return match.id, minutes, status, called
-
-        workers = min(_COMMUTE_PARALLEL, len(commute_jobs))
-        results: list[tuple[UUID, int | None, str, bool]] = []
-        if workers <= 1:
-            results = [_resolve_one(job) for job in commute_jobs]
-        else:
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                futures = {pool.submit(_resolve_one, job): job for job in commute_jobs}
-                for future in as_completed(futures):
-                    results.append(future.result())
-
-        result_by_id = {match_id: (minutes, status, called) for match_id, minutes, status, called in results}
-        for match, talent, project in commute_jobs:
-            minutes, status, called = result_by_id[match.id]
-            if called:
-                stats.commute_api_calls += 1
-            elif status not in ("no_api_key", "missing_place", "monthly_limit"):
-                stats.commute_cache_hits += 1
-            if status == "monthly_limit":
-                stats.commute_skipped_limit += 1
-                continue
-            result = score_pair(
-                **_score_kwargs(
-                    talent,
-                    project,
-                    commute_resolved=True,
-                    commute_minutes=minutes,
-                    own_company_name=own_company_name,
-                    talent_company_name=talent_company_names.get(talent.id),
-                )
-            )
-            result.breakdown["commute_status"] = status
-            update_match_score(
-                session,
-                match_id=match.id,
-                score=result.score,
-                score_band=result.score_band,
-                breakdown=result.breakdown,
-            )
-
 
 def run_match_score_batch(*, trigger: Trigger = "manual") -> MatchBatchStats:
     _, stats = MatchScoreBatch(trigger=trigger).run()

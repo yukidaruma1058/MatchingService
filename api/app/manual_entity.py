@@ -14,6 +14,22 @@ from sqlalchemy.orm import Session
 from app.models import Email
 
 MANUAL_EMAIL_LABEL = "手動登録"
+DEFAULT_MANUAL_FROM = "manual@local"
+
+
+def normalize_manual_from_address(value: str | None) -> str:
+    """空ならプレースホルダ、入力ありなら trim + 小文字化。"""
+    text = (value or "").strip().lower()[:255]
+    return text or DEFAULT_MANUAL_FROM
+
+
+def is_plausible_email_address(value: str) -> bool:
+    """簡易メール形式チェック（@ とドメインのドット）。"""
+    text = (value or "").strip()
+    if not text or "@" not in text:
+        return False
+    local, _, domain = text.partition("@")
+    return bool(local) and "." in domain
 
 
 def create_manual_placeholder_email(
@@ -22,7 +38,7 @@ def create_manual_placeholder_email(
     email_type: str,
     subject: str,
     body_text: str | None = None,
-    from_address: str = "manual@local",
+    from_address: str = DEFAULT_MANUAL_FROM,
 ) -> Email:
     """手動登録用の emails 行を作成して返す（flush 済み）。"""
     now = datetime.now().astimezone()
@@ -32,7 +48,7 @@ def create_manual_placeholder_email(
         gmail_message_id=f"manual-{email_id}",
         thread_id=None,
         label=MANUAL_EMAIL_LABEL,
-        from_address=(from_address or "manual@local").strip()[:255] or "manual@local",
+        from_address=normalize_manual_from_address(from_address),
         subject=(subject or "手動登録").strip() or "手動登録",
         received_at=now,
         body_text=(body_text.strip() if body_text and body_text.strip() else None),

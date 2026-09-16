@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, settings
 from app.constraint_rules import resolve_proposal_commerce_flow
+from app.dashboard_match_display import set_dashboard_pair_proposed
 from app.db_bootstrap import create_session_factory, ensure_schema
 from app.email_db import load_all_settings
 from app.gmail_client import GmailClient, GmailConfigError
@@ -340,6 +341,7 @@ def run_project_propose_batch(
                     match_id=match.id,
                 )
             )
+            set_dashboard_pair_proposed(session, talent.id, project_id, proposed=True)
         session.commit()
         stats.sent = 1
         stats.outreach_message_id = str(outreach.id)

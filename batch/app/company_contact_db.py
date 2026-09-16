@@ -43,6 +43,32 @@ def extract_email_domain(email: str | None) -> str | None:
     return domain
 
 
+def resolve_ingest_contact_email(
+    *,
+    from_address: str | None,
+    reply_to_address: str | None = None,
+    linked_gmail_address: str | None = None,
+) -> str | None:
+    """企業・担当者登録に使うメールアドレスを決める。
+
+    From が連携 Gmail と同じドメイン（グループ窓口経由など）のときは
+    Reply-To を優先する。Reply-To が無い／他ドメイン From は From を使う。
+    """
+    from_addr = extract_email_address(from_address)
+    reply_to = extract_email_address(reply_to_address)
+    linked = extract_email_address(linked_gmail_address)
+    from_domain = extract_email_domain(from_addr)
+    linked_domain = extract_email_domain(linked)
+    if (
+        from_domain
+        and linked_domain
+        and from_domain == linked_domain
+        and reply_to
+    ):
+        return reply_to
+    return from_addr
+
+
 def _merge_kind(existing: str | None, incoming: CompanyKind) -> str:
     if not existing or existing == incoming:
         return incoming
